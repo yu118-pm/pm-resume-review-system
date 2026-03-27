@@ -1,0 +1,14 @@
+{
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "regions": ["hkg1"],
+  "env": {
+    "DASHSCOPE_API_KEY": "@dashscope-api-key",
+    "DASHSCOPE_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "DASHSCOPE_MODEL": "qwen-plus",
+    "REVIEW_DATA_DIR": "/tmp/review-sessions",
+    "SEARCH_API_PROVIDER": "mock"
+  }
+}

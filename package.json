@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "docx": "^9.6.1",
     "mammoth": "^1.9.1",
     "next": "^15.2.0",
     "openai": "^4.89.0",

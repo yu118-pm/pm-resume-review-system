@@ -1,15 +1,6 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import mammoth from "mammoth";
 import pdfParse from "pdf-parse";
-import { runPythonScript } from "@/lib/python-runtime";
-
-const PHOTO_SCRIPT_PATH = join(
-  process.cwd(),
-  "scripts",
-  "extract_resume_photo.py",
-);
+import { extractBestResumePhotoFromDocx } from "./docx-photo-extractor";
 
 export async function parseFile(buffer: Buffer, filename: string): Promise<string> {
   const ext = filename.split(".").pop()?.toLowerCase();
@@ -55,16 +46,12 @@ export async function extractProfilePhoto(
     return null;
   }
 
-  const workdir = await mkdtemp(join(tmpdir(), "resume-photo-"));
-  const inputPath = join(workdir, `source.${ext}`);
-
   try {
-    await writeFile(inputPath, buffer);
-    const { stdout } = await runPythonScript(PHOTO_SCRIPT_PATH, ["--input", inputPath]);
-    return parsePhotoPayload(stdout);
+    const payload = await extractBestResumePhotoFromDocx(buffer);
+    return payload
+      ? parsePhotoPayload(JSON.stringify(payload))
+      : null;
   } catch {
     return null;
-  } finally {
-    await rm(workdir, { recursive: true, force: true });
   }
 }

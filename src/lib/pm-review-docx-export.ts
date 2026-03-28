@@ -1,11 +1,9 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
+import { runPythonScript } from "@/lib/python-runtime";
 import type { PmReviewComment } from "@/lib/types";
 
-const execFileAsync = promisify(execFile);
 const SCRIPT_PATH = join(process.cwd(), "scripts", "annotate_pm_review_docx.py");
 
 export async function exportPmReviewDocx(
@@ -21,8 +19,7 @@ export async function exportPmReviewDocx(
     await writeFile(inputPath, sourceBuffer);
     await writeFile(commentsPath, JSON.stringify(comments, null, 2), "utf-8");
 
-    await execFileAsync("python3", [
-      SCRIPT_PATH,
+    await runPythonScript(SCRIPT_PATH, [
       "--input",
       inputPath,
       "--comments",

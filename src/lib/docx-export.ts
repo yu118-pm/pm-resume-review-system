@@ -1,11 +1,8 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
+import { runPythonScript } from "@/lib/python-runtime";
 import type { TemplateResumeData } from "@/lib/types";
-
-const execFileAsync = promisify(execFile);
 
 const TEMPLATE_PATH = join(process.cwd(), "templates", "resume-template.docx");
 const SCRIPT_PATH = join(process.cwd(), "scripts", "render_resume_docx.py");
@@ -49,21 +46,13 @@ export async function exportResumeDocx(
       await writeFile(photoPath, photo.buffer);
     }
 
-    const args = [
-      SCRIPT_PATH,
-      "--template",
-      TEMPLATE_PATH,
-      "--input",
-      inputPath,
-      "--output",
-      outputPath,
-    ];
+    const args = ["--template", TEMPLATE_PATH, "--input", inputPath, "--output", outputPath];
 
     if (photoPath) {
       args.push("--photo", photoPath);
     }
 
-    await execFileAsync("python3", args);
+    await runPythonScript(SCRIPT_PATH, args);
 
     return await readFile(outputPath);
   } catch (error) {

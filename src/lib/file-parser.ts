@@ -1,12 +1,10 @@
-import { execFile } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import mammoth from "mammoth";
 import pdfParse from "pdf-parse";
+import { runPythonScript } from "@/lib/python-runtime";
 
-const execFileAsync = promisify(execFile);
 const PHOTO_SCRIPT_PATH = join(
   process.cwd(),
   "scripts",
@@ -62,11 +60,7 @@ export async function extractProfilePhoto(
 
   try {
     await writeFile(inputPath, buffer);
-    const { stdout } = await execFileAsync("python3", [
-      PHOTO_SCRIPT_PATH,
-      "--input",
-      inputPath,
-    ]);
+    const { stdout } = await runPythonScript(PHOTO_SCRIPT_PATH, ["--input", inputPath]);
     return parsePhotoPayload(stdout);
   } catch {
     return null;

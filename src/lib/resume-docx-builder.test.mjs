@@ -78,3 +78,22 @@ test("buildResumeDocx generates a docx buffer with resume content", async () => 
   assert.match(documentXml, /实习经历/);
   assert.match(documentXml, /智能客服工作台/);
 });
+
+test("buildResumeDocx keeps the shipped Word template structure", async () => {
+  const buffer = await buildResumeDocx(SAMPLE_RESUME);
+
+  const zip = await JSZip.loadAsync(buffer);
+  const mediaEntries = Object.keys(zip.files).filter((name) =>
+    name.startsWith("word/media/"),
+  );
+  const documentXml = await zip.file("word/document.xml").async("string");
+
+  assert.ok(zip.file("word/header1.xml"), "should preserve template header");
+  assert.ok(
+    zip.file("word/media/image10.png"),
+    "should preserve template section assets",
+  );
+  assert.equal(zip.file("word/comments.xml"), null, "comments should be scrubbed");
+  assert.ok(mediaEntries.length >= 10, "should preserve template media assets");
+  assert.match(documentXml, /（1）熟练 Axure、Figma、SQL/);
+});

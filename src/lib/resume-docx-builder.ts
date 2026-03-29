@@ -1,13 +1,7 @@
-import {
-  AlignmentType,
-  Document,
-  HeadingLevel,
-  ImageRun,
-  Packer,
-  Paragraph,
-  TextRun,
-  convertMillimetersToTwip,
-} from "docx";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
+import JSZip from "jszip";
 import type {
   TemplateCampusExperienceEntry,
   TemplateEducationEntry,
@@ -18,17 +12,90 @@ import type {
 
 type SupportedImageType = "png" | "jpg";
 
+const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/main";
+const WP_NS =
+  "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
+const OFFICE_REL_NS =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships";
+const CONTENT_TYPES_NS =
+  "http://schemas.openxmlformats.org/package/2006/content-types";
+const XML_NS = "http://www.w3.org/XML/1998/namespace";
+const TEMPLATE_PATH = join(process.cwd(), "templates", "resume-template.docx");
+const PHOTO_PLACEHOLDER_DESCR = "icon.jpg";
+const COMMENT_PARTS = new Set([
+  "word/comments.xml",
+  "word/commentsExtended.xml",
+  "word/people.xml",
+]);
+const COMMENT_RELATIONSHIP_TYPES = new Set([
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments",
+  "http://schemas.microsoft.com/office/2011/relationships/commentsExtended",
+  "http://schemas.microsoft.com/office/2011/relationships/people",
+]);
+const COMMENT_OVERRIDE_PARTS = new Set([
+  "/word/comments.xml",
+  "/word/commentsExtended.xml",
+  "/word/people.xml",
+]);
+const COMMENT_TAG_NAMES = new Set([
+  "w:commentRangeStart",
+  "w:commentRangeEnd",
+  "w:commentReference",
+]);
+
+type ParagraphKey =
+  | "name"
+  | "contact"
+  | "age"
+  | "experienceTitle"
+  | "educationAnchor"
+  | "strengthAnchor"
+  | "experienceAnchor"
+  | "projectAnchor"
+  | "campusAnchor";
+
+type PrototypeKey =
+  | "eduHeader"
+  | "eduGap"
+  | "eduCourses"
+  | "eduHonors"
+  | "eduCerts"
+  | "strengthSummary"
+  | "strengthSkillTitle"
+  | "strengthSkillLine"
+  | "strengthQuality"
+  | "expHeader"
+  | "expCompany"
+  | "expWorkTitle"
+  | "expWorkLine"
+  | "expGainTitle"
+  | "expGainLine"
+  | "expGap"
+  | "projHeader"
+  | "projSummary"
+  | "projHighlightTitle"
+  | "projHighlightLine"
+  | "projGap"
+  | "campusBulletHeader"
+  | "campusBulletLine"
+  | "campusDetailedHeader"
+  | "campusBackground"
+  | "campusResponsibilities"
+  | "campusResult"
+  | "campusGap";
+
 function cleanText(value: string | null | undefined) {
   return (value ?? "").replace(/\s+\n/g, "\n").replace(/\u00a0/g, " ").trim();
 }
 
-function cleanList(values: string[] | null | undefined) {
-  return (values ?? []).map((item) => cleanText(item)).filter(Boolean);
+function normalize(value: string | null | undefined) {
+  return cleanText(value);
 }
 
-function buildMetaLine(label: string, value: string) {
-  const text = cleanText(value);
-  return text ? `${label}：${text}` : null;
+function cleanList(values: string[] | null | undefined) {
+  return (values ?? []).map((item) => normalize(item)).filter(Boolean);
 }
 
 function decodeProfilePhotoDataUrl(dataUrl: string) {
@@ -43,482 +110,719 @@ function decodeProfilePhotoDataUrl(dataUrl: string) {
   };
 }
 
-function sectionTitle(title: string) {
-  return new Paragraph({
-    heading: HeadingLevel.HEADING_2,
-    spacing: { before: 280, after: 120 },
-    border: {
-      bottom: {
-        color: "2F6B8A",
-        size: 6,
-        style: "single",
-      },
-    },
-    children: [
-      new TextRun({
-        text: title,
-        bold: true,
-        size: 28,
-        font: "Microsoft YaHei",
-      }),
-    ],
-  });
-}
-
-function bodyParagraph(text: string, options?: { boldPrefix?: string; indent?: number }) {
-  const prefix = cleanText(options?.boldPrefix);
-  const content = cleanText(text);
-
-  if (!content && !prefix) {
-    return null;
+function chineseIndex(value: number) {
+  const digits = "零一二三四五六七八九";
+  if (value <= 10) {
+    return value === 10 ? "十" : digits[value];
   }
 
-  const children = prefix
-    ? [
-      new TextRun({
-        text: prefix,
-        bold: true,
-        font: "Microsoft YaHei",
-      }),
-      new TextRun({
-        text: content ? ` ${content}` : "",
-        font: "Microsoft YaHei",
-      }),
-    ]
-    : [
-      new TextRun({
-        text: content,
-        font: "Microsoft YaHei",
-      }),
-    ];
-
-  return new Paragraph({
-    spacing: { after: 100, line: 320 },
-    indent: options?.indent ? { left: options.indent } : undefined,
-    children,
-  });
-}
-
-function numberedParagraph(index: number, text: string, indent = 360) {
-  const content = cleanText(text);
-  if (!content) {
-    return null;
+  if (value < 20) {
+    return `十${digits[value % 10]}`;
   }
 
-  return new Paragraph({
-    spacing: { after: 80, line: 320 },
-    indent: { left: indent },
-    children: [
-      new TextRun({
-        text: `${index}. ${content}`,
-        font: "Microsoft YaHei",
-      }),
-    ],
-  });
+  const tens = Math.floor(value / 10);
+  const ones = value % 10;
+  const prefix = `${digits[tens]}十`;
+  return ones === 0 ? prefix : `${prefix}${digits[ones]}`;
 }
 
-function buildEducationSection(entries: TemplateEducationEntry[]) {
-  const children: Paragraph[] = [];
-
-  for (const entry of entries) {
-    const header = [cleanText(entry.period), cleanText(entry.school)]
-      .filter(Boolean)
-      .join("  ");
-    const degreeLine = [cleanText(entry.major), cleanText(entry.degree)]
-      .filter(Boolean)
-      .join(" | ");
-
-    if (header) {
-      children.push(
-        new Paragraph({
-          spacing: { after: 80 },
-          children: [
-            new TextRun({
-              text: header,
-              bold: true,
-              size: 24,
-              font: "Microsoft YaHei",
-            }),
-          ],
-        }),
-      );
-    }
-
-    const degreeParagraph = bodyParagraph(degreeLine);
-    if (degreeParagraph) {
-      children.push(degreeParagraph);
-    }
-
-    const coreCourses = bodyParagraph(cleanText(entry.coreCourses), {
-      boldPrefix: "核心课程：",
-      indent: 240,
-    });
-    if (coreCourses) {
-      children.push(coreCourses);
-    }
-
-    const honors = bodyParagraph(cleanText(entry.honors), {
-      boldPrefix: "在校成绩及荣誉：",
-      indent: 240,
-    });
-    if (honors) {
-      children.push(honors);
-    }
-
-    const certificates = bodyParagraph(cleanText(entry.certificates), {
-      boldPrefix: "技能证书：",
-      indent: 240,
-    });
-    if (certificates) {
-      children.push(certificates);
-    }
-  }
-
-  return children;
+function joinHeader(period: string, title: string, role: string) {
+  return [normalize(period), normalize(title), normalize(role)]
+    .filter(Boolean)
+    .join("                        ");
 }
 
-function buildProfessionalStrengthsSection(resume: TemplateResumeData) {
-  const children: Paragraph[] = [];
+function formatNumberedLine(index: number, value: string) {
+  const text = normalize(value);
+  return text ? `${index}.${text}` : `${index}.`;
+}
 
-  const summary = bodyParagraph(cleanText(resume.professionalStrengths.summary), {
-    boldPrefix: "专业经验：",
-  });
-  if (summary) {
-    children.push(summary);
+function blankEducation(): TemplateEducationEntry {
+  return {
+    period: "",
+    school: "",
+    major: "",
+    degree: "",
+    coreCourses: "",
+    honors: "",
+    certificates: "",
+  };
+}
+
+function blankExperience(): TemplateExperienceEntry {
+  return {
+    period: "",
+    company: "",
+    role: "",
+    companySummary: "",
+    responsibilities: [],
+    achievements: [],
+  };
+}
+
+function blankProject(): TemplateProjectEntry {
+  return {
+    period: "",
+    name: "",
+    role: "",
+    summary: "",
+    highlights: [],
+  };
+}
+
+function blankCampus(): TemplateCampusExperienceEntry {
+  return {
+    mode: "bullets",
+    period: "",
+    title: "",
+    role: "",
+    bullets: [],
+    background: "",
+    responsibilities: "",
+    result: "",
+  };
+}
+
+function keepOrBlank<T>(items: T[], factory: () => T) {
+  return items.length ? items : [factory()];
+}
+
+function randomHex(bytes: number) {
+  const alphabet = "0123456789ABCDEF";
+  let output = "";
+
+  for (let index = 0; index < bytes * 2; index += 1) {
+    output += alphabet[Math.floor(Math.random() * alphabet.length)];
   }
 
-  const skillLines = cleanList(resume.professionalStrengths.skillLines);
-  if (skillLines.length) {
-    const skillTitle = bodyParagraph("", { boldPrefix: "专业技能：" });
-    if (skillTitle) {
-      children.push(skillTitle);
-    }
+  return output;
+}
 
-    skillLines.forEach((item, index) => {
-      const paragraph = numberedParagraph(index + 1, item, 360);
+function parseXml(xml: string) {
+  return new DOMParser().parseFromString(xml, "application/xml");
+}
+
+function serializeXml(document: Document) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>${new XMLSerializer().serializeToString(document)}`;
+}
+
+function getElementsByTagNameNS(parent: Document | Element, namespace: string, tag: string) {
+  return Array.from(parent.getElementsByTagNameNS(namespace, tag));
+}
+
+function getParagraphs(document: Document) {
+  return getElementsByTagNameNS(document, WORD_NS, "p");
+}
+
+function requireParagraph(
+  paragraphs: Element[],
+  index: number,
+  label: string,
+) {
+  const paragraph = paragraphs[index];
+
+  if (!paragraph) {
+    throw new Error(`模板缺少段落锚点: ${label} @ ${index}`);
+  }
+
+  return paragraph;
+}
+
+function updateParagraphIds(paragraph: Element) {
+  if (paragraph.hasAttribute("w14:paraId")) {
+    paragraph.setAttribute("w14:paraId", randomHex(4));
+  }
+
+  if (paragraph.hasAttribute("w14:textId")) {
+    paragraph.setAttribute("w14:textId", randomHex(4));
+  }
+}
+
+function cloneParagraphAfter(anchor: Element, templateParagraph: Element) {
+  const clone = templateParagraph.cloneNode(true) as Element;
+  const parent = anchor.parentNode;
+
+  if (!parent) {
+    throw new Error("模板段落缺少父节点");
+  }
+
+  updateParagraphIds(clone);
+
+  if (anchor.nextSibling) {
+    parent.insertBefore(clone, anchor.nextSibling);
+  } else {
+    parent.appendChild(clone);
+  }
+
+  return clone;
+}
+
+function removeParagraph(paragraph: Element) {
+  paragraph.parentNode?.removeChild(paragraph);
+}
+
+function getRuns(paragraph: Element) {
+  return getElementsByTagNameNS(paragraph, WORD_NS, "r");
+}
+
+function getTextNodes(run: Element) {
+  return getElementsByTagNameNS(run, WORD_NS, "t");
+}
+
+function setTextContent(node: Element, value: string) {
+  while (node.firstChild) {
+    node.removeChild(node.firstChild);
+  }
+
+  if (/^\s|\s$/u.test(value)) {
+    node.setAttributeNS(XML_NS, "xml:space", "preserve");
+  } else {
+    node.removeAttributeNS(XML_NS, "space");
+    node.removeAttribute("xml:space");
+  }
+
+  node.appendChild(node.ownerDocument.createTextNode(value));
+}
+
+function clearRunText(run: Element) {
+  for (const textNode of getTextNodes(run)) {
+    setTextContent(textNode, "");
+  }
+}
+
+function setFullText(paragraph: Element, value: string) {
+  const runs = getRuns(paragraph).filter((run) => getTextNodes(run).length > 0);
+  const text = normalize(value);
+
+  if (!runs.length) {
+    return;
+  }
+
+  const [firstRun, ...restRuns] = runs;
+  const firstTextNodes = getTextNodes(firstRun);
+
+  if (firstTextNodes.length) {
+    setTextContent(firstTextNodes[0], text);
+    firstTextNodes.slice(1).forEach((node) => setTextContent(node, ""));
+  }
+
+  restRuns.forEach(clearRunText);
+}
+
+function setRunText(paragraph: Element, index: number, value: string) {
+  const run = getRuns(paragraph)[index];
+
+  if (!run) {
+    return;
+  }
+
+  const textNodes = getTextNodes(run);
+  if (!textNodes.length) {
+    return;
+  }
+
+  setTextContent(textNodes[0], value);
+  textNodes.slice(1).forEach((node) => setTextContent(node, ""));
+}
+
+function buildRefs(paragraphs: Element[]) {
+  return {
+    name: requireParagraph(paragraphs, 1, "name"),
+    contact: requireParagraph(paragraphs, 3, "contact"),
+    age: requireParagraph(paragraphs, 4, "age"),
+    experienceTitle: requireParagraph(paragraphs, 26, "experienceTitle"),
+    educationAnchor: requireParagraph(paragraphs, 9, "educationAnchor"),
+    strengthAnchor: requireParagraph(paragraphs, 18, "strengthAnchor"),
+    experienceAnchor: requireParagraph(paragraphs, 28, "experienceAnchor"),
+    projectAnchor: requireParagraph(paragraphs, 49, "projectAnchor"),
+    campusAnchor: requireParagraph(paragraphs, 65, "campusAnchor"),
+  } satisfies Record<ParagraphKey, Element>;
+}
+
+function buildPrototypes(paragraphs: Element[]) {
+  const cloneParagraph = (index: number, label: string) =>
+    requireParagraph(paragraphs, index, label).cloneNode(true) as Element;
+
+  return {
+    eduHeader: cloneParagraph(10, "eduHeader"),
+    eduGap: cloneParagraph(11, "eduGap"),
+    eduCourses: cloneParagraph(12, "eduCourses"),
+    eduHonors: cloneParagraph(13, "eduHonors"),
+    eduCerts: cloneParagraph(14, "eduCerts"),
+    strengthSummary: cloneParagraph(19, "strengthSummary"),
+    strengthSkillTitle: cloneParagraph(20, "strengthSkillTitle"),
+    strengthSkillLine: cloneParagraph(21, "strengthSkillLine"),
+    strengthQuality: cloneParagraph(24, "strengthQuality"),
+    expHeader: cloneParagraph(29, "expHeader"),
+    expCompany: cloneParagraph(30, "expCompany"),
+    expWorkTitle: cloneParagraph(31, "expWorkTitle"),
+    expWorkLine: cloneParagraph(32, "expWorkLine"),
+    expGainTitle: cloneParagraph(34, "expGainTitle"),
+    expGainLine: cloneParagraph(35, "expGainLine"),
+    expGap: cloneParagraph(45, "expGap"),
+    projHeader: cloneParagraph(50, "projHeader"),
+    projSummary: cloneParagraph(51, "projSummary"),
+    projHighlightTitle: cloneParagraph(53, "projHighlightTitle"),
+    projHighlightLine: cloneParagraph(54, "projHighlightLine"),
+    projGap: cloneParagraph(62, "projGap"),
+    campusBulletHeader: cloneParagraph(66, "campusBulletHeader"),
+    campusBulletLine: cloneParagraph(67, "campusBulletLine"),
+    campusDetailedHeader: cloneParagraph(70, "campusDetailedHeader"),
+    campusBackground: cloneParagraph(71, "campusBackground"),
+    campusResponsibilities: cloneParagraph(72, "campusResponsibilities"),
+    campusResult: cloneParagraph(73, "campusResult"),
+    campusGap: cloneParagraph(74, "campusGap"),
+  } satisfies Record<PrototypeKey, Element>;
+}
+
+function removePrototypeRanges(paragraphs: Element[]) {
+  const ranges = [
+    [66, 73],
+    [50, 61],
+    [29, 44],
+    [19, 24],
+    [10, 14],
+  ];
+
+  for (const [start, end] of ranges) {
+    for (let index = start; index <= end; index += 1) {
+      const paragraph = paragraphs[index];
       if (paragraph) {
-        children.push(paragraph);
+        removeParagraph(paragraph);
       }
-    });
+    }
+  }
+}
+
+function stripCommentNodes(node: Node) {
+  const childNodes = Array.from(node.childNodes);
+
+  for (const child of childNodes) {
+    if (child.nodeType !== child.ELEMENT_NODE) {
+      continue;
+    }
+
+    const element = child as Element;
+    const tagName = element.tagName;
+
+    if (COMMENT_TAG_NAMES.has(tagName)) {
+      node.removeChild(child);
+      continue;
+    }
+
+    stripCommentNodes(child);
+  }
+}
+
+async function scrubComments(zip: JSZip) {
+  zip.remove("word/comments.xml");
+  zip.remove("word/commentsExtended.xml");
+  zip.remove("word/people.xml");
+
+  const contentTypesFile = zip.file("[Content_Types].xml");
+  if (contentTypesFile) {
+    const xml = await contentTypesFile.async("string");
+    const document = parseXml(xml);
+    const root = document.documentElement;
+
+    for (const child of Array.from(root.childNodes)) {
+      if (child.nodeType !== child.ELEMENT_NODE) {
+        continue;
+      }
+
+      const element = child as Element;
+      if (COMMENT_OVERRIDE_PARTS.has(element.getAttribute("PartName") ?? "")) {
+        root.removeChild(child);
+      }
+    }
+
+    zip.file("[Content_Types].xml", serializeXml(document));
   }
 
-  const quality = bodyParagraph(cleanText(resume.professionalStrengths.coreQuality), {
-    boldPrefix: "核心素质：",
+  const documentRelsFile = zip.file("word/_rels/document.xml.rels");
+  if (documentRelsFile) {
+    const xml = await documentRelsFile.async("string");
+    const document = parseXml(xml);
+    const root = document.documentElement;
+
+    for (const child of Array.from(root.childNodes)) {
+      if (child.nodeType !== child.ELEMENT_NODE) {
+        continue;
+      }
+
+      const element = child as Element;
+      if (COMMENT_RELATIONSHIP_TYPES.has(element.getAttribute("Type") ?? "")) {
+        root.removeChild(child);
+      }
+    }
+
+    zip.file("word/_rels/document.xml.rels", serializeXml(document));
+  }
+
+  const wordFiles = Object.keys(zip.files).filter(
+    (name) => name.startsWith("word/") && name.endsWith(".xml") && !COMMENT_PARTS.has(name),
+  );
+
+  for (const fileName of wordFiles) {
+    const file = zip.file(fileName);
+    if (!file) {
+      continue;
+    }
+
+    const xml = await file.async("string");
+    const document = parseXml(xml);
+    stripCommentNodes(document.documentElement);
+    zip.file(fileName, serializeXml(document));
+  }
+}
+
+function findPhotoRelationshipId(document: Document) {
+  const anchors = getElementsByTagNameNS(document, WP_NS, "anchor");
+
+  for (const anchor of anchors) {
+    const docPr = getElementsByTagNameNS(anchor, WP_NS, "docPr")[0];
+    if (!docPr || docPr.getAttribute("descr") !== PHOTO_PLACEHOLDER_DESCR) {
+      continue;
+    }
+
+    const blip = getElementsByTagNameNS(anchor, DRAWING_NS, "blip")[0];
+    if (!blip) {
+      continue;
+    }
+
+    return (
+      blip.getAttributeNS(OFFICE_REL_NS, "embed") ??
+      blip.getAttribute("r:embed") ??
+      null
+    );
+  }
+
+  return null;
+}
+
+async function ensureContentTypeForImage(zip: JSZip, type: SupportedImageType) {
+  const contentTypesFile = zip.file("[Content_Types].xml");
+  if (!contentTypesFile) {
+    return;
+  }
+
+  const extension = type === "png" ? "png" : "jpeg";
+  const mimeType = type === "png" ? "image/png" : "image/jpeg";
+  const xml = await contentTypesFile.async("string");
+  const document = parseXml(xml);
+  const root = document.documentElement;
+  const defaultNodes = getElementsByTagNameNS(document, CONTENT_TYPES_NS, "Default");
+  const hasDefault = defaultNodes.some(
+    (node) => (node.getAttribute("Extension") ?? "").toLowerCase() === extension,
+  );
+
+  if (!hasDefault) {
+    const element = document.createElementNS(CONTENT_TYPES_NS, "Default");
+    element.setAttribute("Extension", extension);
+    element.setAttribute("ContentType", mimeType);
+    root.appendChild(element);
+  }
+
+  zip.file("[Content_Types].xml", serializeXml(document));
+}
+
+async function applyProfilePhoto(zip: JSZip, photo: { data: Buffer; type: SupportedImageType }) {
+  const documentFile = zip.file("word/document.xml");
+  const relsFile = zip.file("word/_rels/document.xml.rels");
+
+  if (!documentFile || !relsFile) {
+    return;
+  }
+
+  const documentXml = await documentFile.async("string");
+  const document = parseXml(documentXml);
+  const relationshipId = findPhotoRelationshipId(document);
+
+  if (!relationshipId) {
+    return;
+  }
+
+  const relsXml = await relsFile.async("string");
+  const relsDocument = parseXml(relsXml);
+  const relationships = getElementsByTagNameNS(relsDocument, REL_NS, "Relationship");
+  const targetName =
+    photo.type === "png" ? "word/media/profile-photo.png" : "word/media/profile-photo.jpg";
+  const targetValue = targetName.replace(/^word\//u, "");
+
+  for (const relationship of relationships) {
+    if ((relationship.getAttribute("Id") ?? "") === relationshipId) {
+      relationship.setAttribute("Target", targetValue);
+    }
+  }
+
+  await ensureContentTypeForImage(zip, photo.type);
+  zip.file("word/_rels/document.xml.rels", serializeXml(relsDocument));
+  zip.file(targetName, photo.data);
+}
+
+function fillEducationSection(
+  refs: Record<ParagraphKey, Element>,
+  prototypes: Record<PrototypeKey, Element>,
+  resume: TemplateResumeData,
+) {
+  let anchor = refs.educationAnchor;
+
+  for (const education of keepOrBlank(resume.educations, blankEducation)) {
+    const header = cloneParagraphAfter(anchor, prototypes.eduHeader);
+    const period = normalize(education.period);
+    const school = normalize(education.school);
+    const major = normalize(education.major);
+    const degree = normalize(education.degree);
+    const tail = [major, degree].filter(Boolean).join(" | ");
+
+    setFullText(
+      header,
+      [period, school, tail].filter(Boolean).join("                      "),
+    );
+
+    const gap = cloneParagraphAfter(header, prototypes.eduGap);
+    const courses = cloneParagraphAfter(gap, prototypes.eduCourses);
+    setRunText(courses, 1, `：${normalize(education.coreCourses)}`);
+
+    const honors = cloneParagraphAfter(courses, prototypes.eduHonors);
+    setRunText(honors, 1, `：${normalize(education.honors)}`);
+
+    const certs = cloneParagraphAfter(honors, prototypes.eduCerts);
+    setRunText(certs, 1, `：${normalize(education.certificates)}`);
+
+    anchor = certs;
+  }
+}
+
+function fillProfessionalStrengthsSection(
+  refs: Record<ParagraphKey, Element>,
+  prototypes: Record<PrototypeKey, Element>,
+  resume: TemplateResumeData,
+) {
+  const summary = cloneParagraphAfter(refs.strengthAnchor, prototypes.strengthSummary);
+  setRunText(summary, 2, ` ${normalize(resume.professionalStrengths.summary)}`);
+
+  const skillTitle = cloneParagraphAfter(summary, prototypes.strengthSkillTitle);
+  let anchor = skillTitle;
+  const skillLines = resume.professionalStrengths.skillLines.length
+    ? resume.professionalStrengths.skillLines
+    : [""];
+
+  skillLines.forEach((item, index) => {
+    const skillLine = cloneParagraphAfter(anchor, prototypes.strengthSkillLine);
+    setFullText(skillLine, item ? `（${index + 1}）${normalize(item)}` : "");
+    anchor = skillLine;
   });
-  if (quality) {
-    children.push(quality);
-  }
 
-  return children;
+  const quality = cloneParagraphAfter(anchor, prototypes.strengthQuality);
+  setRunText(quality, 1, `：${normalize(resume.professionalStrengths.coreQuality)}`);
 }
 
-function buildExperienceSection(entries: TemplateExperienceEntry[]) {
-  const children: Paragraph[] = [];
+function fillExperienceSection(
+  refs: Record<ParagraphKey, Element>,
+  prototypes: Record<PrototypeKey, Element>,
+  resume: TemplateResumeData,
+) {
+  let anchor = refs.experienceAnchor;
+  const entries = keepOrBlank(resume.experiences, blankExperience);
 
-  for (const [index, entry] of entries.entries()) {
-    const header = [cleanText(entry.period), cleanText(entry.company), cleanText(entry.role)]
-      .filter(Boolean)
-      .join("  ");
+  entries.forEach((experience, index) => {
+    const header = cloneParagraphAfter(anchor, prototypes.expHeader);
+    setFullText(
+      header,
+      `${chineseIndex(index + 1)}、${joinHeader(
+        experience.period,
+        experience.company,
+        experience.role,
+      )}`,
+    );
 
-    if (header) {
-      children.push(
-        new Paragraph({
-          spacing: { before: index === 0 ? 0 : 180, after: 80 },
-          children: [
-            new TextRun({
-              text: `${index + 1}. ${header}`,
-              bold: true,
-              size: 24,
-              font: "Microsoft YaHei",
-            }),
-          ],
-        }),
-      );
-    }
+    anchor = header;
 
-    const companySummary = bodyParagraph(cleanText(entry.companySummary), {
-      boldPrefix: "公司/业务背景：",
-      indent: 240,
-    });
+    const companySummary = normalize(experience.companySummary);
     if (companySummary) {
-      children.push(companySummary);
+      const company = cloneParagraphAfter(anchor, prototypes.expCompany);
+      setRunText(company, 1, `：${companySummary}`);
+      anchor = company;
     }
 
-    const responsibilities = cleanList(entry.responsibilities);
+    const responsibilities = cleanList(experience.responsibilities);
     if (responsibilities.length) {
-      const title = bodyParagraph("", { boldPrefix: "岗位职责：" });
-      if (title) {
-        children.push(title);
-      }
-
-      responsibilities.forEach((item, itemIndex) => {
-        const paragraph = numberedParagraph(itemIndex + 1, item, 360);
-        if (paragraph) {
-          children.push(paragraph);
-        }
-      });
+      const workTitle = cloneParagraphAfter(anchor, prototypes.expWorkTitle);
+      setRunText(workTitle, 1, "：");
+      anchor = workTitle;
     }
 
-    const achievements = cleanList(entry.achievements);
-    if (achievements.length) {
-      const title = bodyParagraph("", { boldPrefix: "工作成果：" });
-      if (title) {
-        children.push(title);
-      }
-
-      achievements.forEach((item, itemIndex) => {
-        const paragraph = numberedParagraph(itemIndex + 1, item, 360);
-        if (paragraph) {
-          children.push(paragraph);
-        }
-      });
-    }
-  }
-
-  return children;
-}
-
-function buildProjectSection(entries: TemplateProjectEntry[]) {
-  const children: Paragraph[] = [];
-
-  for (const [index, entry] of entries.entries()) {
-    const header = [cleanText(entry.period), cleanText(entry.name), cleanText(entry.role)]
-      .filter(Boolean)
-      .join("  ");
-
-    if (header) {
-      children.push(
-        new Paragraph({
-          spacing: { before: index === 0 ? 0 : 180, after: 80 },
-          children: [
-            new TextRun({
-              text: `${index + 1}. ${header}`,
-              bold: true,
-              size: 24,
-              font: "Microsoft YaHei",
-            }),
-          ],
-        }),
-      );
-    }
-
-    const summary = bodyParagraph(cleanText(entry.summary), {
-      boldPrefix: "项目介绍：",
-      indent: 240,
+    responsibilities.forEach((item, itemIndex) => {
+      const line = cloneParagraphAfter(anchor, prototypes.expWorkLine);
+      setFullText(line, formatNumberedLine(itemIndex + 1, item));
+      anchor = line;
     });
-    if (summary) {
-      children.push(summary);
+
+    const achievements = cleanList(experience.achievements);
+    if (achievements.length) {
+      const gainTitle = cloneParagraphAfter(anchor, prototypes.expGainTitle);
+      setRunText(gainTitle, 1, "：");
+      anchor = gainTitle;
     }
 
-    const highlights = cleanList(entry.highlights);
-    if (highlights.length) {
-      const title = bodyParagraph("", { boldPrefix: "亮点与成果：" });
-      if (title) {
-        children.push(title);
-      }
+    achievements.forEach((item, itemIndex) => {
+      const line = cloneParagraphAfter(anchor, prototypes.expGainLine);
+      setFullText(line, formatNumberedLine(itemIndex + 1, item));
+      anchor = line;
+    });
 
-      highlights.forEach((item, itemIndex) => {
-        const paragraph = numberedParagraph(itemIndex + 1, item, 360);
-        if (paragraph) {
-          children.push(paragraph);
-        }
-      });
+    if (index < entries.length - 1) {
+      anchor = cloneParagraphAfter(anchor, prototypes.expGap);
     }
-  }
-
-  return children;
+  });
 }
 
-function buildCampusSection(entries: TemplateCampusExperienceEntry[]) {
-  const children: Paragraph[] = [];
+function fillProjectSection(
+  refs: Record<ParagraphKey, Element>,
+  prototypes: Record<PrototypeKey, Element>,
+  resume: TemplateResumeData,
+) {
+  let anchor = refs.projectAnchor;
+  const entries = keepOrBlank(resume.projects, blankProject);
 
-  for (const [index, entry] of entries.entries()) {
-    const header = [cleanText(entry.period), cleanText(entry.title), cleanText(entry.role)]
-      .filter(Boolean)
-      .join("  ");
+  entries.forEach((project, index) => {
+    const header = cloneParagraphAfter(anchor, prototypes.projHeader);
+    setFullText(
+      header,
+      `${chineseIndex(index + 1)}、${joinHeader(project.period, project.name, project.role)}`,
+    );
+    anchor = header;
 
-    if (header) {
-      children.push(
-        new Paragraph({
-          spacing: { before: index === 0 ? 0 : 180, after: 80 },
-          children: [
-            new TextRun({
-              text: `${index + 1}. ${header}`,
-              bold: true,
-              size: 24,
-              font: "Microsoft YaHei",
-            }),
-          ],
-        }),
-      );
+    const summary = normalize(project.summary);
+    if (summary) {
+      const projectSummary = cloneParagraphAfter(anchor, prototypes.projSummary);
+      setRunText(projectSummary, 1, `：${summary}`);
+      anchor = projectSummary;
     }
 
+    const highlights = cleanList(project.highlights);
+    if (highlights.length) {
+      const highlightTitle = cloneParagraphAfter(anchor, prototypes.projHighlightTitle);
+      setRunText(highlightTitle, 2, "：");
+      anchor = highlightTitle;
+    }
+
+    highlights.forEach((item, itemIndex) => {
+      const line = cloneParagraphAfter(anchor, prototypes.projHighlightLine);
+      setFullText(line, formatNumberedLine(itemIndex + 1, item));
+      anchor = line;
+    });
+
+    if (index < entries.length - 1) {
+      anchor = cloneParagraphAfter(anchor, prototypes.projGap);
+    }
+  });
+}
+
+function fillCampusSection(
+  refs: Record<ParagraphKey, Element>,
+  prototypes: Record<PrototypeKey, Element>,
+  resume: TemplateResumeData,
+) {
+  let anchor = refs.campusAnchor;
+  const entries = keepOrBlank(resume.campusExperiences, blankCampus);
+
+  entries.forEach((entry, index) => {
     if (entry.mode === "detailed") {
-      const background = bodyParagraph(cleanText(entry.background), {
-        boldPrefix: "背景介绍：",
-        indent: 240,
-      });
-      if (background) {
-        children.push(background);
-      }
+      const header = cloneParagraphAfter(anchor, prototypes.campusDetailedHeader);
+      setFullText(
+        header,
+        `${chineseIndex(index + 1)}、${joinHeader(entry.period, entry.title, entry.role)}`,
+      );
 
-      const responsibilities = bodyParagraph(cleanText(entry.responsibilities), {
-        boldPrefix: "核心职责：",
-        indent: 240,
-      });
-      if (responsibilities) {
-        children.push(responsibilities);
-      }
+      const background = cloneParagraphAfter(header, prototypes.campusBackground);
+      setRunText(background, 1, `: ${normalize(entry.background)}`);
 
-      const result = bodyParagraph(cleanText(entry.result), {
-        boldPrefix: "项目成绩：",
-        indent: 240,
-      });
-      if (result) {
-        children.push(result);
-      }
+      const responsibilities = cloneParagraphAfter(
+        background,
+        prototypes.campusResponsibilities,
+      );
+      setRunText(responsibilities, 1, `: ${normalize(entry.responsibilities)}`);
+
+      const result = cloneParagraphAfter(responsibilities, prototypes.campusResult);
+      setRunText(result, 1, `: ${normalize(entry.result)}`);
+      anchor = result;
     } else {
-      cleanList(entry.bullets).forEach((item, itemIndex) => {
-        const paragraph = numberedParagraph(itemIndex + 1, item, 360);
-        if (paragraph) {
-          children.push(paragraph);
-        }
+      const header = cloneParagraphAfter(anchor, prototypes.campusBulletHeader);
+      setFullText(
+        header,
+        `${chineseIndex(index + 1)}、${joinHeader(entry.period, entry.title, entry.role)}`,
+      );
+      anchor = header;
+
+      const bullets = entry.bullets.length ? entry.bullets : [""];
+      bullets.forEach((item, itemIndex) => {
+        const bullet = cloneParagraphAfter(anchor, prototypes.campusBulletLine);
+        setFullText(bullet, formatNumberedLine(itemIndex + 1, item));
+        anchor = bullet;
       });
     }
+
+    if (index < entries.length - 1) {
+      anchor = cloneParagraphAfter(anchor, prototypes.campusGap);
+    }
+  });
+}
+
+async function renderResumeTemplate(
+  resume: TemplateResumeData,
+  profilePhotoDataUrl?: string | null,
+) {
+  const templateBuffer = await readFile(TEMPLATE_PATH);
+  const zip = await JSZip.loadAsync(templateBuffer);
+  const documentFile = zip.file("word/document.xml");
+
+  if (!documentFile) {
+    throw new Error("模板文档缺少 word/document.xml");
   }
 
-  return children;
+  const documentXml = await documentFile.async("string");
+  const document = parseXml(documentXml);
+  const paragraphs = getParagraphs(document);
+  const refs = buildRefs(paragraphs);
+  const prototypes = buildPrototypes(paragraphs);
+
+  removePrototypeRanges(paragraphs);
+
+  setFullText(refs.name, normalize(resume.personal.name));
+  setRunText(refs.contact, 3, normalize(resume.personal.phone));
+  setRunText(refs.contact, 9, normalize(resume.personal.email));
+  setRunText(refs.age, 3, normalize(resume.personal.age));
+  setRunText(refs.age, 9, normalize(resume.personal.highestEducation));
+  setFullText(refs.experienceTitle, normalize(resume.experienceSectionTitle));
+
+  fillEducationSection(refs, prototypes, resume);
+  fillProfessionalStrengthsSection(refs, prototypes, resume);
+  fillExperienceSection(refs, prototypes, resume);
+  fillProjectSection(refs, prototypes, resume);
+  fillCampusSection(refs, prototypes, resume);
+
+  zip.file("word/document.xml", serializeXml(document));
+
+  const photo = profilePhotoDataUrl
+    ? decodeProfilePhotoDataUrl(profilePhotoDataUrl)
+    : null;
+  if (photo) {
+    await applyProfilePhoto(zip, photo);
+  }
+
+  await scrubComments(zip);
+
+  return zip.generateAsync({
+    type: "nodebuffer",
+    compression: "DEFLATE",
+  });
 }
 
 export async function buildResumeDocx(
   resume: TemplateResumeData,
   profilePhotoDataUrl?: string | null,
 ) {
-  const children: Paragraph[] = [];
-
-  children.push(
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 120 },
-      children: [
-        new TextRun({
-          text: cleanText(resume.personal.name) || "未命名候选人",
-          bold: true,
-          size: 36,
-          font: "Microsoft YaHei",
-        }),
-      ],
-    }),
-  );
-
-  const metaLine = [
-    buildMetaLine("电话", resume.personal.phone),
-    buildMetaLine("邮箱", resume.personal.email),
-    buildMetaLine("年龄", resume.personal.age),
-    buildMetaLine("最高学历", resume.personal.highestEducation),
-  ]
-    .filter(Boolean)
-    .join("  |  ");
-
-  if (metaLine) {
-    children.push(
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 160 },
-        children: [
-          new TextRun({
-            text: metaLine,
-            size: 21,
-            font: "Microsoft YaHei",
-          }),
-        ],
-      }),
-    );
-  }
-
-  const photo = profilePhotoDataUrl
-    ? decodeProfilePhotoDataUrl(profilePhotoDataUrl)
-    : null;
-  if (photo) {
-    children.push(
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 180 },
-        children: [
-          new ImageRun({
-            type: photo.type,
-            data: photo.data,
-            transformation: { width: 108, height: 144 },
-          }),
-        ],
-      }),
-    );
-  }
-
-  const sections: Array<{ title: string; paragraphs: Paragraph[] }> = [
-    {
-      title: "教育经历",
-      paragraphs: buildEducationSection(resume.educations),
-    },
-    {
-      title: "专业能力",
-      paragraphs: buildProfessionalStrengthsSection(resume),
-    },
-    {
-      title: cleanText(resume.experienceSectionTitle) || "经历",
-      paragraphs: buildExperienceSection(resume.experiences),
-    },
-    {
-      title: "项目经历",
-      paragraphs: buildProjectSection(resume.projects),
-    },
-    {
-      title: "在校经历",
-      paragraphs: buildCampusSection(resume.campusExperiences),
-    },
-  ];
-
-  for (const section of sections) {
-    if (!section.paragraphs.length) {
-      continue;
-    }
-
-    children.push(sectionTitle(section.title));
-    children.push(...section.paragraphs);
-  }
-
-  const doc = new Document({
-    styles: {
-      default: {
-        document: {
-          run: {
-            font: "Microsoft YaHei",
-            size: 21,
-          },
-          paragraph: {
-            spacing: {
-              line: 320,
-            },
-          },
-        },
-      },
-    },
-    sections: [
-      {
-        properties: {
-          page: {
-            margin: {
-              top: convertMillimetersToTwip(18),
-              right: convertMillimetersToTwip(16),
-              bottom: convertMillimetersToTwip(18),
-              left: convertMillimetersToTwip(16),
-            },
-          },
-        },
-        children,
-      },
-    ],
-  });
-
-  return Packer.toBuffer(doc);
+  return renderResumeTemplate(resume, profilePhotoDataUrl);
 }

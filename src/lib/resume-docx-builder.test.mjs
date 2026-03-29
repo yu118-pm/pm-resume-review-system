@@ -97,3 +97,23 @@ test("buildResumeDocx keeps the shipped Word template structure", async () => {
   assert.ok(mediaEntries.length >= 10, "should preserve template media assets");
   assert.match(documentXml, /（1）熟练 Axure、Figma、SQL/);
 });
+
+test("buildResumeDocx writes XML parts with a single XML declaration", async () => {
+  const buffer = await buildResumeDocx(SAMPLE_RESUME);
+  const zip = await JSZip.loadAsync(buffer);
+
+  for (const fileName of [
+    "[Content_Types].xml",
+    "word/document.xml",
+    "word/_rels/document.xml.rels",
+  ]) {
+    const xml = await zip.file(fileName).async("string");
+    const declarations = xml.match(/<\?xml[^>]*\?>/g) ?? [];
+    assert.equal(
+      declarations.length,
+      1,
+      `${fileName} should contain exactly one XML declaration`,
+    );
+    assert.match(xml, /^<\?xml[^>]*\?>/);
+  }
+});

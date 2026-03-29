@@ -203,7 +203,13 @@ function parseXml(xml: string) {
 }
 
 function serializeXml(document: Document) {
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>${new XMLSerializer().serializeToString(document)}`;
+  const serialized = new XMLSerializer().serializeToString(document);
+  const withoutDeclaration = serialized.replace(
+    /^\s*(<\?xml[^>]*\?>\s*)+/i,
+    "",
+  );
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>${withoutDeclaration}`;
 }
 
 function getElementsByTagNameNS(parent: Document | Element, namespace: string, tag: string) {

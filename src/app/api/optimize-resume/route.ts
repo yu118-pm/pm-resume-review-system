@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildUserPrompt, SYSTEM_PROMPT } from "@/lib/prompts";
-import { callLLM } from "@/lib/openai";
+import { callLLM, getLLMConfigSummary, getLLMErrorInfo } from "@/lib/openai";
 import { parseAIResponse, ResumeParseError } from "@/lib/parser";
 import {
   buildRetryPrompt,
@@ -93,6 +93,19 @@ export async function POST(request: Request) {
 
     if (error instanceof ResumeGuardError) {
       return jsonError("模型输出包含不可信内容，请重试", 502, error.violations);
+    }
+
+    const llmError = getLLMErrorInfo(error);
+
+    console.error("[api/optimize-resume] 简历优化失败", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      llm: getLLMConfigSummary(),
+      llmError: llmError?.log,
+    });
+
+    if (llmError) {
+      return jsonError(llmError.message, llmError.status);
     }
 
     return jsonError("简历优化失败，请稍后重试", 500);

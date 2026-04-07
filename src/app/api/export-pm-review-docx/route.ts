@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     const buffer = await exportPmReviewDocx(Buffer.from(arrayBuffer), comments);
     const fileName = createPmReviewFileName(file.name);
 
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
         "Content-Type":

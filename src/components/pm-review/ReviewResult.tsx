@@ -81,12 +81,14 @@ export function ReviewResult({
 }) {
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState<"success" | "error" | null>(null);
   const groups = groupByModule(comments);
 
   async function handleExport() {
     if (!uploadedFile || comments.length === 0) return;
     setExporting(true);
     setExportMsg(null);
+    setExportStatus(null);
     try {
       const formData = new FormData();
       formData.append("file", uploadedFile);
@@ -108,9 +110,11 @@ export function ReviewResult({
       a.click();
       URL.revokeObjectURL(url);
       setExportMsg("Word 批注文件已开始下载");
+      setExportStatus("success");
       window.setTimeout(() => setExportMsg(null), 2000);
     } catch (e) {
       setExportMsg(e instanceof Error ? e.message : "导出失败");
+      setExportStatus("error");
     } finally {
       setExporting(false);
     }
@@ -147,7 +151,13 @@ export function ReviewResult({
       </div>
 
       {exportMsg && (
-        <div className="mb-4 px-4 py-2.5 rounded-2xl bg-green-50 border border-green-200 text-green-700 text-sm">
+        <div
+          className={`mb-4 px-4 py-2.5 rounded-2xl text-sm ${
+            exportStatus === "error"
+              ? "bg-red-50 border border-red-200 text-red-700"
+              : "bg-green-50 border border-green-200 text-green-700"
+          }`}
+        >
           {exportMsg}
         </div>
       )}

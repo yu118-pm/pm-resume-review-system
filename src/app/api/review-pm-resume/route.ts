@@ -6,6 +6,9 @@ import type {
   ReviewPmResumeResponse,
 } from "@/lib/types";
 
+export const runtime = "nodejs";
+export const maxDuration = 300;
+
 function jsonError(message: string, status: number, details?: string[]) {
   return NextResponse.json<ApiErrorResponse>(
     details?.length

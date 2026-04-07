@@ -20,6 +20,11 @@ export interface ReviewProgress {
   detail: string;
 }
 
+interface StructureModule {
+  normalizedModule: string;
+  textContent?: string;
+}
+
 // ─── 常量 ─────────────────────────────────────────────────────────────────────
 
 const DATA_KEYWORDS =
@@ -167,6 +172,55 @@ function buildMissingModuleComment(moduleName: string): PmReviewComment {
   };
 }
 
+async function reviewSingleModule(
+  module: StructureModule,
+  resumeText: string,
+  onProgress?: (progress: ReviewProgress) => void,
+): Promise<PmReviewComment[]> {
+  onProgress?.({ step: 3, stepName: "分模块批阅", detail: module.normalizedModule });
+  console.log("[pm-review-agent] Step 3: 模块批阅中", {
+    module: module.normalizedModule,
+  });
+
+  const moduleText = module.textContent || resumeText;
+  const systemPrompt = getModuleSystemPrompt(module.normalizedModule);
+  const baseUserPrompt = buildModuleReviewUserPrompt(moduleText, resumeText);
+  const maxTokens = module.normalizedModule === "项目经历" ? 4096 : 3072;
+
+  let lastParseError: string | undefined;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const userPrompt =
+        attempt === 2 && lastParseError
+          ? `${baseUserPrompt}\n\n${buildParseRetryPrompt(lastParseError)}`
+          : baseUserPrompt;
+
+      const result = await callLLMWithMeta(systemPrompt, userPrompt, {
+        maxTokens,
+        responseFormat: "json_object",
+        temperature: 0.3,
+      });
+      return parsePmReviewResponse(result.content);
+    } catch (e) {
+      lastParseError = e instanceof Error ? e.message : String(e);
+      if (attempt === 2) {
+        console.error(
+          `[pm-review-agent] Step 3: 模块 ${module.normalizedModule} 批阅失败，跳过`,
+          { error: lastParseError },
+        );
+      } else {
+        console.warn(
+          `[pm-review-agent] Step 3: 模块 ${module.normalizedModule} 批阅失败，重试`,
+          { error: lastParseError },
+        );
+      }
+    }
+  }
+
+  return [];
+}
+
 // ─── 主函数 ───────────────────────────────────────────────────────────────────
 
 export async function reviewResume(
@@ -233,52 +287,11 @@ export async function reviewResume(
   });
 
   // ── Step 3: 分模块批阅 ──────────────────────────────────────────────────────
-  const allComments: PmReviewComment[] = [];
-
-  for (const module of structure.modules) {
-    onProgress?.({ step: 3, stepName: "分模块批阅", detail: module.normalizedModule });
-    console.log("[pm-review-agent] Step 3: 模块批阅中", {
-      module: module.normalizedModule,
-    });
-
-    const moduleText = module.textContent || resumeText;
-    const systemPrompt = getModuleSystemPrompt(module.normalizedModule);
-    const baseUserPrompt = buildModuleReviewUserPrompt(moduleText, resumeText);
-    const maxTokens = module.normalizedModule === "项目经历" ? 4096 : 3072;
-
-    let lastParseError: string | undefined;
-
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const userPrompt =
-          attempt === 2 && lastParseError
-            ? `${baseUserPrompt}\n\n${buildParseRetryPrompt(lastParseError)}`
-            : baseUserPrompt;
-
-        const result = await callLLMWithMeta(systemPrompt, userPrompt, {
-          maxTokens,
-          responseFormat: "json_object",
-          temperature: 0.3,
-        });
-        const comments = parsePmReviewResponse(result.content);
-        allComments.push(...comments);
-        break;
-      } catch (e) {
-        lastParseError = e instanceof Error ? e.message : String(e);
-        if (attempt === 2) {
-          console.error(
-            `[pm-review-agent] Step 3: 模块 ${module.normalizedModule} 批阅失败，跳过`,
-            { error: lastParseError },
-          );
-        } else {
-          console.warn(
-            `[pm-review-agent] Step 3: 模块 ${module.normalizedModule} 批阅失败，重试`,
-            { error: lastParseError },
-          );
-        }
-      }
-    }
-  }
+  const allComments = (
+    await Promise.all(
+      structure.modules.map((module) => reviewSingleModule(module, resumeText, onProgress)),
+    )
+  ).flat();
 
   for (const missing of structure.missingModules) {
     allComments.push(buildMissingModuleComment(missing));

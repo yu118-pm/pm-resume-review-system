@@ -3,8 +3,15 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { PmReviewComment, ReviewSession, ReviewHistoryEntry } from "@/lib/types";
 
+function resolveDefaultDataDir(): string {
+  if (process.env.VERCEL === "1" || process.env.VERCEL_ENV) {
+    return "/tmp/review-sessions";
+  }
+  return "./data/review-sessions";
+}
+
 function getDataDir(): string {
-  return process.env.REVIEW_DATA_DIR || "./data/review-sessions";
+  return process.env.REVIEW_DATA_DIR || resolveDefaultDataDir();
 }
 
 function generateSessionId(): string {

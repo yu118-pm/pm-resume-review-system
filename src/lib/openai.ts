@@ -5,6 +5,7 @@ const DEFAULT_MODEL = "qwen-plus";
 
 export interface CallLLMOptions {
   maxTokens?: number;
+  model?: string;
   responseFormat?: "text" | "json_object";
   temperature?: number;
 }
@@ -30,11 +31,15 @@ function readEnv(name: string) {
   return process.env[name]?.trim() ?? "";
 }
 
-function resolveLLMConfig() {
+function resolveLLMConfig(overrides?: { model?: string }) {
   const apiKey = readEnv("DASHSCOPE_API_KEY") || readEnv("OPENAI_API_KEY");
   const baseURL =
     readEnv("DASHSCOPE_BASE_URL") || readEnv("OPENAI_BASE_URL") || DEFAULT_BASE_URL;
-  const model = readEnv("DASHSCOPE_MODEL") || readEnv("OPENAI_MODEL") || DEFAULT_MODEL;
+  const model =
+    overrides?.model?.trim() ||
+    readEnv("DASHSCOPE_MODEL") ||
+    readEnv("OPENAI_MODEL") ||
+    DEFAULT_MODEL;
 
   return { apiKey, baseURL, model };
 }
@@ -54,7 +59,9 @@ export async function callLLMWithMeta(
   userPrompt: string,
   options: CallLLMOptions = {},
 ): Promise<LLMCallResult> {
-  const { apiKey, baseURL, model } = resolveLLMConfig();
+  const { apiKey, baseURL, model } = resolveLLMConfig({
+    model: options.model,
+  });
 
   if (!apiKey) {
     throw new Error("缺少模型 API Key，请配置 DASHSCOPE_API_KEY 或 OPENAI_API_KEY");

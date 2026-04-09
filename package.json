@@ -10,6 +10,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@alicloud/openapi-client": "^0.4.15",
+    "@alicloud/openapi-util": "^0.3.3",
+    "@alicloud/tea-util": "^1.4.11",
+    "ali-oss": "^6.23.0",
     "docx": "^9.6.1",
     "mammoth": "^1.9.1",
     "next": "^15.2.0",

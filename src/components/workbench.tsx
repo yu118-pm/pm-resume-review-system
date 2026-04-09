@@ -18,10 +18,11 @@ import type {
   OptimizationNote,
   TemplateResumeData,
 } from "@/lib/types";
+import { HomeworkReviewPage } from "@/components/homework-review/HomeworkReviewPage";
 import { PmReviewPage } from "@/components/pm-review/PmReviewPage";
 
 type ActiveTab = "resume" | "notes";
-type ToolMode = "optimize" | "pmReview";
+type ToolMode = "optimize" | "pmReview" | "homeworkReview";
 
 const TOOLS: Array<{
   key: ToolMode | "jd" | "coverLetter" | "interview" | "crm";
@@ -31,6 +32,7 @@ const TOOLS: Array<{
 }> = [
     { key: "optimize", name: "简历优化", description: "目标岗位重写", active: true },
     { key: "pmReview", name: "PM 简历批阅", description: "DOCX 批注输出", active: true },
+    { key: "homeworkReview", name: "作业批阅", description: "音视频讲解稿", active: true },
     { key: "jd", name: "JD 拆解", description: "即将上线", active: false },
     { key: "coverLetter", name: "求职信生成", description: "即将上线", active: false },
     { key: "interview", name: "面试准备", description: "即将上线", active: false },
@@ -302,11 +304,15 @@ export function Workbench({
               const href =
                 tool.key === "pmReview"
                   ? "/?tool=pm-review"
+                  : tool.key === "homeworkReview"
+                    ? "/?tool=homework-review"
                   : tool.key === "optimize"
                     ? "/"
                     : null;
               const targetTool =
-                tool.key === "pmReview" || tool.key === "optimize"
+                tool.key === "pmReview" ||
+                tool.key === "optimize" ||
+                tool.key === "homeworkReview"
                   ? tool.key
                   : null;
 
@@ -581,6 +587,7 @@ export function Workbench({
         ) : null}
 
         {activeTool === "pmReview" ? <PmReviewPage /> : null}
+        {activeTool === "homeworkReview" ? <HomeworkReviewPage /> : null}
       </section>
 
       {previewPayload ? (

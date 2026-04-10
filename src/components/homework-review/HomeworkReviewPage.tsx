@@ -11,104 +11,131 @@ import type {
   HomeworkReviewStatusResponse,
   HomeworkReviewSubmitResponse,
   HomeworkReviewTaskPayload,
+  HomeworkReviewUpsertQuestionResponse,
 } from "@/lib/homework-review-types";
 
-const CUSTOM_QUESTIONS_STORAGE_KEY = "homework-review-custom-questions-v1";
+const LEGACY_CUSTOM_QUESTIONS_STORAGE_KEY = "homework-review-custom-questions-v1";
 
 function getFileKey(file: File) {
   return `${file.name}::${file.size}::${file.lastModified}`;
 }
 
-function toQuestionSummary(question: HomeworkQuestion, isCustom: boolean): HomeworkQuestionSummary {
-  return {
-    id: question.id,
-    title: question.title,
-    category: question.category,
-    requiresStar: question.requiresStar,
-    isCustom,
-  };
-}
-
-function loadStoredCustomQuestions(): HomeworkQuestion[] {
+function loadLegacyCustomQuestions(): HomeworkQuestionDraft[] {
   if (typeof window === "undefined") {
     return [];
   }
 
   try {
-    const raw = window.localStorage.getItem(CUSTOM_QUESTIONS_STORAGE_KEY);
+    const raw = window.localStorage.getItem(LEGACY_CUSTOM_QUESTIONS_STORAGE_KEY);
 
     if (!raw) {
       return [];
     }
 
     const parsed = JSON.parse(raw) as HomeworkQuestion[];
-    return Array.isArray(parsed)
-      ? parsed.filter(
-          (item) =>
-            Boolean(item?.id) &&
-            Boolean(item?.title) &&
-            Boolean(item?.content) &&
-            Boolean(item?.category),
-        )
-      : [];
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter(
+        (item) =>
+          Boolean(item?.title?.trim()) &&
+          Boolean(item?.content?.trim()),
+      )
+      .map((item) => ({
+        title: item.title.trim(),
+        content: item.content.trim(),
+        category: item.category?.trim() || "自定义题目",
+        requiresStar: Boolean(item.requiresStar),
+        reviewFocus: item.reviewFocus?.filter(Boolean),
+      }));
   } catch {
     return [];
   }
 }
 
 export function HomeworkReviewPage() {
-  const customQuestionsRef = useRef<HomeworkQuestion[]>([]);
+  const didMigrateLegacyQuestionsRef = useRef(false);
   const pollingTimersRef = useRef<Record<string, number>>({});
-  const [customQuestions, setCustomQuestions] = useState<HomeworkQuestion[]>([]);
-  const [presetQuestions, setPresetQuestions] = useState<HomeworkQuestionSummary[]>([]);
+  const [questions, setQuestions] = useState<HomeworkQuestionSummary[]>([]);
   const [questionsLoading, setQuestionsLoading] = useState(true);
   const [questionsError, setQuestionsError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [submittingCount, setSubmittingCount] = useState(0);
   const [tasks, setTasks] = useState<HomeworkReviewTaskPayload[]>([]);
-  const questions = [
-    ...customQuestions.map((question) => toQuestionSummary(question, true)),
-    ...presetQuestions,
-  ];
 
-  useEffect(() => {
-    setCustomQuestions(loadStoredCustomQuestions());
-  }, []);
+  async function fetchQuestions(options?: { showLoading?: boolean }) {
+    if (options?.showLoading) {
+      setQuestionsLoading(true);
+    }
 
-  useEffect(() => {
-    customQuestionsRef.current = customQuestions;
+    try {
+      const response = await fetch("/api/homework-review/questions", {
+        cache: "no-store",
+      });
+      const data = (await response.json()) as
+        | HomeworkReviewQuestionsResponse
+        | { success: false; error: string };
 
-    if (typeof window === "undefined") {
+      if (!response.ok || !data.success) {
+        throw new Error(data.success ? "题目加载失败" : data.error);
+      }
+
+      setQuestions(data.questions);
+      setQuestionsError(null);
+    } catch (error) {
+      setQuestionsError(
+        error instanceof Error ? error.message : "题目加载失败，请稍后重试",
+      );
+    } finally {
+      if (options?.showLoading) {
+        setQuestionsLoading(false);
+      }
+    }
+  }
+
+  async function migrateLegacyQuestions() {
+    if (didMigrateLegacyQuestionsRef.current || typeof window === "undefined") {
       return;
     }
 
-    window.localStorage.setItem(
-      CUSTOM_QUESTIONS_STORAGE_KEY,
-      JSON.stringify(customQuestions),
+    didMigrateLegacyQuestionsRef.current = true;
+    const legacyQuestions = loadLegacyCustomQuestions();
+
+    if (legacyQuestions.length === 0) {
+      return;
+    }
+
+    const settled = await Promise.allSettled(
+      legacyQuestions.map((question) =>
+        fetch("/api/homework-review/questions", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(question),
+        }),
+      ),
     );
-  }, [customQuestions]);
+    const hasFailed = settled.some(
+      (result) =>
+        result.status === "rejected" ||
+        (result.status === "fulfilled" && !result.value.ok),
+    );
+
+    if (!hasFailed) {
+      window.localStorage.removeItem(LEGACY_CUSTOM_QUESTIONS_STORAGE_KEY);
+      await fetchQuestions();
+    }
+  }
 
   useEffect(() => {
     void (async () => {
-      try {
-        const response = await fetch("/api/homework-review/questions");
-        const data = (await response.json()) as
-          | HomeworkReviewQuestionsResponse
-          | { success: false; error: string };
-
-        if (!response.ok || !data.success) {
-          throw new Error(data.success ? "题目加载失败" : data.error);
-        }
-
-        setPresetQuestions(data.questions);
-      } catch (error) {
-        setQuestionsError(
-          error instanceof Error ? error.message : "题目加载失败，请稍后重试",
-        );
-      } finally {
-        setQuestionsLoading(false);
-      }
+      await fetchQuestions({ showLoading: true });
+      await migrateLegacyQuestions();
     })();
 
     return () => {
@@ -118,49 +145,6 @@ export function HomeworkReviewPage() {
       pollingTimersRef.current = {};
     };
   }, []);
-
-  function saveCustomQuestion(draft: HomeworkQuestionDraft) {
-    const title = draft.title.trim();
-    const content = draft.content.trim();
-    const category = draft.category?.trim() || "自定义题目";
-    const reviewFocus = draft.reviewFocus?.filter(Boolean);
-    const currentQuestions = customQuestionsRef.current;
-    const existing = currentQuestions.find(
-      (question) =>
-        question.title.trim() === title && question.content.trim() === content,
-    );
-
-    if (existing) {
-      const nextQuestions = currentQuestions.map((question) =>
-        question.id === existing.id
-          ? {
-              ...question,
-              category,
-              requiresStar: Boolean(draft.requiresStar),
-              reviewFocus,
-            }
-          : question,
-      );
-
-      customQuestionsRef.current = nextQuestions;
-      setCustomQuestions(nextQuestions);
-      return existing.id;
-    }
-
-    const nextQuestion: HomeworkQuestion = {
-      id: `custom_local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      title,
-      content,
-      category,
-      requiresStar: Boolean(draft.requiresStar),
-      reviewFocus,
-    };
-    const nextQuestions = [nextQuestion, ...currentQuestions];
-
-    customQuestionsRef.current = nextQuestions;
-    setCustomQuestions(nextQuestions);
-    return nextQuestion.id;
-  }
 
   function upsertTask(nextTask: HomeworkReviewTaskPayload) {
     setTasks((current) => {
@@ -248,21 +232,28 @@ export function HomeworkReviewPage() {
     setSubmitError(null);
 
     try {
-      const selectedCustomQuestion = params.questionId
-        ? customQuestions.find((question) => question.id === params.questionId)
-        : null;
-      const effectiveCustomQuestion =
-        params.customQuestion?.title?.trim() && params.customQuestion.content?.trim()
-          ? params.customQuestion
-          : selectedCustomQuestion
-            ? {
-                title: selectedCustomQuestion.title,
-                content: selectedCustomQuestion.content,
-                category: selectedCustomQuestion.category,
-                requiresStar: selectedCustomQuestion.requiresStar,
-                reviewFocus: selectedCustomQuestion.reviewFocus,
-              }
-            : undefined;
+      let savedQuestionId: string | undefined;
+
+      if (params.customQuestion?.title?.trim() && params.customQuestion.content?.trim()) {
+        const response = await fetch("/api/homework-review/questions", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(params.customQuestion),
+        });
+        const data = (await response.json()) as
+          | HomeworkReviewUpsertQuestionResponse
+          | { success: false; error: string };
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.success ? "题目保存失败" : data.error);
+        }
+
+        savedQuestionId = data.question.id;
+      }
+
+      const resolvedQuestionId = savedQuestionId || params.questionId;
 
       const settledResults = await Promise.allSettled(
         params.files.map(async (file) => {
@@ -270,21 +261,9 @@ export function HomeworkReviewPage() {
           formData.append("file", file);
           formData.append("studentName", params.studentName);
 
-          if (effectiveCustomQuestion?.title?.trim() && effectiveCustomQuestion.content?.trim()) {
-            formData.append("questionMode", "custom");
-            formData.append("customQuestionTitle", effectiveCustomQuestion.title);
-            formData.append("customQuestionContent", effectiveCustomQuestion.content);
-            formData.append(
-              "customQuestionCategory",
-              effectiveCustomQuestion.category?.trim() || "自定义题目",
-            );
-            formData.append(
-              "customQuestionRequiresStar",
-              effectiveCustomQuestion.requiresStar ? "true" : "false",
-            );
-          } else if (params.questionId) {
+          if (resolvedQuestionId) {
             formData.append("questionMode", "preset");
-            formData.append("questionId", params.questionId);
+            formData.append("questionId", resolvedQuestionId);
           }
 
           const response = await fetch("/api/homework-review/submit", {
@@ -323,13 +302,12 @@ export function HomeworkReviewPage() {
         schedulePoll(task.taskId, task.nextPollDelayMs);
       });
 
-      const savedQuestionId =
-        effectiveCustomQuestion && succeededResults.length > 0
-          ? saveCustomQuestion(effectiveCustomQuestion)
-          : undefined;
-
       if (failedMessages.length > 0) {
         setSubmitError(failedMessages.join("；"));
+      }
+
+      if (savedQuestionId) {
+        await fetchQuestions();
       }
 
       return {

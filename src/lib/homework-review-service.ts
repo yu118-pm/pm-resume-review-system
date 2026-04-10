@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { deleteHomeworkReviewSourceFile, uploadHomeworkReviewSourceFile } from "@/lib/aliyun-oss";
 import {
-  createCustomHomeworkQuestion,
   getHomeworkQuestionById,
+  upsertHomeworkQuestion,
 } from "@/lib/homework-questions";
 import {
   buildFallbackHomeworkReview,
@@ -114,17 +114,14 @@ function buildMockTranscript(task: HomeworkReviewTaskState) {
   ].join("");
 }
 
-function resolveHomeworkQuestion(input: {
+async function resolveHomeworkQuestion(input: {
   customQuestion?: HomeworkQuestionDraft;
   questionId?: string;
 }) {
   return input.customQuestion?.title?.trim() && input.customQuestion.content?.trim()
-    ? createCustomHomeworkQuestion(
-        input.customQuestion,
-        `custom_${Date.now()}_${randomUUID().slice(0, 6)}`,
-      )
+    ? upsertHomeworkQuestion(input.customQuestion)
     : input.questionId
-      ? getHomeworkQuestionById(input.questionId)
+      ? await getHomeworkQuestionById(input.questionId)
       : null;
 }
 
@@ -422,7 +419,7 @@ export async function submitHomeworkReviewTask(input: {
   studentName?: string;
 }) {
   const provider = getProvider();
-  const question = resolveHomeworkQuestion({
+  const question = await resolveHomeworkQuestion({
     customQuestion: input.customQuestion,
     questionId: input.questionId,
   });

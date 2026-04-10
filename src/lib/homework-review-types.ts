@@ -109,6 +109,11 @@ export interface HomeworkReviewQuestionsResponse {
   questions: HomeworkQuestionSummary[];
 }
 
+export interface HomeworkReviewUpsertQuestionResponse {
+  success: true;
+  question: HomeworkQuestionSummary;
+}
+
 export interface HomeworkReviewSubmitResponse {
   success: true;
   task: HomeworkReviewTaskPayload;

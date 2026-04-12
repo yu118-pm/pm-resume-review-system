@@ -103,7 +103,7 @@ export async function uploadHomeworkReviewSourceFile(input: {
   };
 }
 
-export function createHomeworkReviewSourceUploadPlan(input: {
+export async function createHomeworkReviewSourceUploadPlan(input: {
   fileName: string;
   fileType?: string;
   uploadId: string;
@@ -116,15 +116,17 @@ export function createHomeworkReviewSourceUploadPlan(input: {
         "Content-Type": input.fileType.trim(),
       }
     : {};
-  const uploadUrl = client.signatureUrl(objectKey, {
+  const uploadUrl = await client.signatureUrlV4(
+    "PUT",
     expires,
-    method: "PUT",
-    ...(input.fileType?.trim()
+    Object.keys(uploadHeaders).length > 0
       ? {
-          "Content-Type": input.fileType.trim(),
+          headers: uploadHeaders,
         }
-      : {}),
-  });
+      : undefined,
+    objectKey,
+    Object.keys(uploadHeaders),
+  );
 
   return {
     objectKey,

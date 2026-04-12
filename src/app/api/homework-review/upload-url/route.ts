@@ -34,7 +34,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json<HomeworkReviewUploadPlanResponse>({
       success: true,
-      upload: createHomeworkReviewSourceUploadPlan({
+      upload: await createHomeworkReviewSourceUploadPlan({
         fileName,
         fileType,
         uploadId: `upload_${Date.now()}_${randomUUID().slice(0, 8)}`,

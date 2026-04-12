@@ -1,9 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { deleteHomeworkReviewSourceFile, uploadHomeworkReviewSourceFile } from "@/lib/aliyun-oss";
+import {
+  deleteHomeworkReviewSourceFile,
+  getHomeworkReviewSourceFileSignedUrl,
+  uploadHomeworkReviewSourceFile,
+} from "@/lib/aliyun-oss";
 import {
   getHomeworkQuestionById,
   upsertHomeworkQuestion,
 } from "@/lib/homework-questions";
+import {
+  validateHomeworkReviewSourceMeta,
+  type HomeworkReviewSourceMeta,
+} from "@/lib/homework-review-source";
 import {
   buildFallbackHomeworkReview,
   buildHomeworkReviewUserPrompt,
@@ -26,7 +34,6 @@ import {
   getTingwuTaskInfo,
 } from "@/lib/tingwu";
 
-const MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024;
 const MOCK_TRANSCRIPTION_DELAY_MS = 3_000;
 const MOCK_REVIEW_DELAY_MS = 1_500;
 
@@ -48,18 +55,6 @@ function nowIso() {
 
 function buildTaskId() {
   return `hw_${Date.now()}_${randomUUID().slice(0, 8)}`;
-}
-
-function isSupportedMediaFile(file: File) {
-  const lowerName = file.name.toLowerCase();
-
-  return (
-    file.type.startsWith("audio/") ||
-    file.type.startsWith("video/") ||
-    [".mp3", ".mp4", ".wav", ".m4a", ".flac", ".aac", ".mov"].some((ext) =>
-      lowerName.endsWith(ext),
-    )
-  );
 }
 
 function getNextPollDelayMs(task: HomeworkReviewTaskState) {
@@ -126,20 +121,10 @@ async function resolveHomeworkQuestion(input: {
 }
 
 function validateHomeworkInput(input: {
-  file: File;
+  source: HomeworkReviewSourceMeta;
   question: HomeworkQuestion | null;
 }) {
-  if (!input.file || input.file.size <= 0) {
-    throw new Error("请先上传音视频文件");
-  }
-
-  if (input.file.size > MAX_FILE_SIZE_BYTES) {
-    throw new Error("文件超过 500MB，请压缩后重试");
-  }
-
-  if (!isSupportedMediaFile(input.file)) {
-    throw new Error("仅支持 mp3/mp4/wav/m4a/flac/aac/mov 格式");
-  }
+  validateHomeworkReviewSourceMeta(input.source);
 
   if (!input.question) {
     throw new Error("题目不存在，或自定义题目内容不完整");
@@ -251,15 +236,16 @@ async function finalizeHomeworkReview(task: HomeworkReviewTaskState) {
 }
 
 function buildBaseTask(input: {
-  file: File;
+  fileName: string;
+  fileSize: number;
   question: HomeworkQuestion;
   studentName?: string;
   taskId: string;
 }) {
   return {
     createdAt: nowIso(),
-    fileName: input.file.name,
-    fileSize: input.file.size,
+    fileName: input.fileName,
+    fileSize: input.fileSize,
     question: input.question,
     step: 2,
     studentName: input.studentName?.trim() || "未命名学员",
@@ -270,14 +256,16 @@ function buildBaseTask(input: {
 }
 
 function createMockTask(input: {
-  file: File;
+  fileName: string;
+  fileSize: number;
   question: HomeworkQuestion;
   studentName?: string;
 }) {
   const taskId = buildTaskId();
   const task: HomeworkReviewTaskState = {
     ...buildBaseTask({
-      file: input.file,
+      fileName: input.fileName,
+      fileSize: input.fileSize,
       question: input.question,
       studentName: input.studentName,
       taskId,
@@ -295,20 +283,46 @@ function createMockTask(input: {
   return task;
 }
 
+async function prepareTingwuSourceFile(input: {
+  file?: File;
+  fileName: string;
+  sourceObjectKey?: string;
+  taskId: string;
+}) {
+  if (input.sourceObjectKey) {
+    return getHomeworkReviewSourceFileSignedUrl(input.sourceObjectKey);
+  }
+
+  if (!input.file) {
+    throw new Error("缺少待上传的音视频文件");
+  }
+
+  return uploadHomeworkReviewSourceFile({
+    file: input.file,
+    taskId: input.taskId,
+  });
+}
+
 async function createTingwuTask(input: {
-  file: File;
+  file?: File;
+  fileName: string;
+  fileSize: number;
   question: HomeworkQuestion;
+  sourceObjectKey?: string;
   studentName?: string;
 }) {
   const taskId = buildTaskId();
   const baseTask = buildBaseTask({
-    file: input.file,
+    fileName: input.fileName,
+    fileSize: input.fileSize,
     question: input.question,
     studentName: input.studentName,
     taskId,
   });
-  const uploadResult = await uploadHomeworkReviewSourceFile({
+  const uploadResult = await prepareTingwuSourceFile({
     file: input.file,
+    fileName: input.fileName,
+    sourceObjectKey: input.sourceObjectKey,
     taskId,
   });
 
@@ -414,8 +428,12 @@ async function syncTingwuTranscriptionTask(task: HomeworkReviewTaskState) {
 
 export async function submitHomeworkReviewTask(input: {
   customQuestion?: HomeworkQuestionDraft;
-  file: File;
+  file?: File;
+  fileName?: string;
+  fileSize?: number;
+  fileType?: string;
   questionId?: string;
+  sourceObjectKey?: string;
   studentName?: string;
 }) {
   const provider = getProvider();
@@ -423,9 +441,14 @@ export async function submitHomeworkReviewTask(input: {
     customQuestion: input.customQuestion,
     questionId: input.questionId,
   });
+  const source: HomeworkReviewSourceMeta = {
+    fileName: input.file?.name ?? input.fileName ?? "",
+    fileSize: input.file?.size ?? input.fileSize ?? 0,
+    fileType: input.file?.type ?? input.fileType ?? "",
+  };
 
   validateHomeworkInput({
-    file: input.file,
+    source,
     question,
   });
 
@@ -436,14 +459,18 @@ export async function submitHomeworkReviewTask(input: {
   const task =
     provider === "mock"
       ? createMockTask({
-          file: input.file,
+          fileName: source.fileName,
+          fileSize: source.fileSize,
           question,
           studentName: input.studentName,
         })
       : provider === "tingwu"
         ? await createTingwuTask({
             file: input.file,
+            fileName: source.fileName,
+            fileSize: source.fileSize,
             question,
+            sourceObjectKey: input.sourceObjectKey,
             studentName: input.studentName,
           })
         : (() => {

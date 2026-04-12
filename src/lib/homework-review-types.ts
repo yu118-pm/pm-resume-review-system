@@ -123,3 +123,13 @@ export interface HomeworkReviewStatusResponse {
   success: true;
   task: HomeworkReviewTaskPayload;
 }
+
+export interface HomeworkReviewUploadPlanResponse {
+  success: true;
+  upload: {
+    objectKey: string;
+    uploadHeaders: Record<string, string>;
+    uploadUrl: string;
+    uploadUrlExpiresAt: string;
+  };
+}

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { TaskCard } from "./TaskCard";
 import { TaskSubmitForm } from "./TaskSubmitForm";
+import { buildHttpErrorMessage, readJsonResponse } from "@/lib/http-response";
 import type {
   HomeworkQuestion,
   HomeworkQuestionDraft,
@@ -11,6 +12,7 @@ import type {
   HomeworkReviewStatusResponse,
   HomeworkReviewSubmitResponse,
   HomeworkReviewTaskPayload,
+  HomeworkReviewUploadPlanResponse,
   HomeworkReviewUpsertQuestionResponse,
 } from "@/lib/homework-review-types";
 
@@ -56,6 +58,14 @@ function loadLegacyCustomQuestions(): HomeworkQuestionDraft[] {
   }
 }
 
+function shouldUseDirectOssUpload() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return !["localhost", "127.0.0.1"].includes(window.location.hostname);
+}
+
 export function HomeworkReviewPage() {
   const didMigrateLegacyQuestionsRef = useRef(false);
   const pollingTimersRef = useRef<Record<string, number>>({});
@@ -76,9 +86,10 @@ export function HomeworkReviewPage() {
       const response = await fetch("/api/homework-review/questions", {
         cache: "no-store",
       });
-      const data = (await response.json()) as
-        | HomeworkReviewQuestionsResponse
-        | { success: false; error: string };
+      const data = await readJsonResponse<HomeworkReviewQuestionsResponse | {
+        success: false;
+        error: string;
+      }>(response, "题目加载失败");
 
       if (!response.ok || !data.success) {
         throw new Error(data.success ? "题目加载失败" : data.error);
@@ -186,9 +197,10 @@ export function HomeworkReviewPage() {
       const response = await fetch(
         `/api/homework-review/status?taskId=${encodeURIComponent(taskId)}`,
       );
-      const data = (await response.json()) as
-        | HomeworkReviewStatusResponse
-        | { success: false; error: string };
+      const data = await readJsonResponse<HomeworkReviewStatusResponse | {
+        success: false;
+        error: string;
+      }>(response, "任务查询失败");
 
       if (!response.ok || !data.success) {
         throw new Error(data.success ? "任务查询失败" : data.error);
@@ -233,6 +245,7 @@ export function HomeworkReviewPage() {
 
     try {
       let savedQuestionId: string | undefined;
+      const useDirectOssUpload = shouldUseDirectOssUpload();
 
       if (params.customQuestion?.title?.trim() && params.customQuestion.content?.trim()) {
         const response = await fetch("/api/homework-review/questions", {
@@ -242,9 +255,10 @@ export function HomeworkReviewPage() {
           },
           body: JSON.stringify(params.customQuestion),
         });
-        const data = (await response.json()) as
-          | HomeworkReviewUpsertQuestionResponse
-          | { success: false; error: string };
+        const data = await readJsonResponse<HomeworkReviewUpsertQuestionResponse | {
+          success: false;
+          error: string;
+        }>(response, "题目保存失败");
 
         if (!response.ok || !data.success) {
           throw new Error(data.success ? "题目保存失败" : data.error);
@@ -258,21 +272,85 @@ export function HomeworkReviewPage() {
       const settledResults = await Promise.allSettled(
         params.files.map(async (file) => {
           const formData = new FormData();
-          formData.append("file", file);
-          formData.append("studentName", params.studentName);
+          let response: Response;
 
-          if (resolvedQuestionId) {
-            formData.append("questionMode", "preset");
-            formData.append("questionId", resolvedQuestionId);
+          if (useDirectOssUpload) {
+            const uploadPlanResponse = await fetch("/api/homework-review/upload-url", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+              },
+              body: JSON.stringify({
+                fileName: file.name,
+                fileSize: file.size,
+                fileType: file.type,
+              }),
+            });
+            const uploadPlanData = await readJsonResponse<
+              | HomeworkReviewUploadPlanResponse
+              | { success: false; error: string }
+            >(uploadPlanResponse, "创建 OSS 上传地址失败");
+
+            if (!uploadPlanResponse.ok || !uploadPlanData.success) {
+              throw new Error(
+                uploadPlanData.success ? "创建 OSS 上传地址失败" : uploadPlanData.error,
+              );
+            }
+
+            try {
+              const uploadResponse = await fetch(uploadPlanData.upload.uploadUrl, {
+                method: "PUT",
+                headers: uploadPlanData.upload.uploadHeaders,
+                body: file,
+              });
+
+              if (!uploadResponse.ok) {
+                const raw = await uploadResponse.text();
+                throw new Error(buildHttpErrorMessage(uploadResponse, raw, "上传 OSS 失败"));
+              }
+            } catch (error) {
+              if (error instanceof TypeError) {
+                throw new Error(
+                  "上传 OSS 失败，请检查 OSS Bucket CORS 是否允许当前域名发起 PUT 请求",
+                );
+              }
+
+              throw error;
+            }
+
+            response = await fetch("/api/homework-review/submit", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+              },
+              body: JSON.stringify({
+                fileName: file.name,
+                fileSize: file.size,
+                fileType: file.type,
+                questionId: resolvedQuestionId,
+                sourceObjectKey: uploadPlanData.upload.objectKey,
+                studentName: params.studentName,
+              }),
+            });
+          } else {
+            formData.append("file", file);
+            formData.append("studentName", params.studentName);
+
+            if (resolvedQuestionId) {
+              formData.append("questionMode", "preset");
+              formData.append("questionId", resolvedQuestionId);
+            }
+
+            response = await fetch("/api/homework-review/submit", {
+              method: "POST",
+              body: formData,
+            });
           }
 
-          const response = await fetch("/api/homework-review/submit", {
-            method: "POST",
-            body: formData,
-          });
-          const data = (await response.json()) as
-            | HomeworkReviewSubmitResponse
-            | { success: false; error: string };
+          const data = await readJsonResponse<HomeworkReviewSubmitResponse | {
+            success: false;
+            error: string;
+          }>(response, "任务提交失败");
 
           if (!response.ok || !data.success) {
             throw new Error(data.success ? "任务提交失败" : data.error);

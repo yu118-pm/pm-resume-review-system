@@ -103,6 +103,49 @@ export async function uploadHomeworkReviewSourceFile(input: {
   };
 }
 
+export function createHomeworkReviewSourceUploadPlan(input: {
+  fileName: string;
+  fileType?: string;
+  uploadId: string;
+}) {
+  const client = getOssClient();
+  const objectKey = buildObjectKey(input.uploadId, input.fileName);
+  const expires = getSignedUrlExpires();
+  const uploadHeaders: Record<string, string> = input.fileType?.trim()
+    ? {
+        "Content-Type": input.fileType.trim(),
+      }
+    : {};
+  const uploadUrl = client.signatureUrl(objectKey, {
+    expires,
+    method: "PUT",
+    ...(input.fileType?.trim()
+      ? {
+          "Content-Type": input.fileType.trim(),
+        }
+      : {}),
+  });
+
+  return {
+    objectKey,
+    uploadHeaders,
+    uploadUrl,
+    uploadUrlExpiresAt: new Date(Date.now() + expires * 1000).toISOString(),
+  };
+}
+
+export function getHomeworkReviewSourceFileSignedUrl(objectKey: string) {
+  const client = getOssClient();
+  const expires = getSignedUrlExpires();
+  const signedUrl = client.signatureUrl(objectKey, { expires });
+
+  return {
+    objectKey,
+    signedUrl,
+    signedUrlExpiresAt: new Date(Date.now() + expires * 1000).toISOString(),
+  };
+}
+
 export async function deleteHomeworkReviewSourceFile(objectKey: string) {
   const client = getOssClient();
   await client.delete(objectKey);

@@ -13,3 +13,10 @@ test("SYSTEM_PROMPT constrains professional strengths to template-style sentence
   assert.match(SYSTEM_PROMPT, /曾做过/u);
   assert.match(SYSTEM_PROMPT, /达成/u);
 });
+
+test("SYSTEM_PROMPT requires supplemental named projects to be placed intentionally", () => {
+  assert.match(SYSTEM_PROMPT, /补充信息整合策略/u);
+  assert.match(SYSTEM_PROMPT, /项目名称 \+ 项目背景 \+ 我的工作 \+ 项目成果/u);
+  assert.match(SYSTEM_PROMPT, /不能只把它压缩进 experiences\[\]\.responsibilities/u);
+  assert.match(SYSTEM_PROMPT, /projects 中形成独立项目条目/u);
+});

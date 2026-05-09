@@ -74,6 +74,9 @@ vercel
 | `DASHSCOPE_MODEL` | `qwen-plus` | 模型名称 |
 | `REVIEW_DATA_DIR` | `/tmp/review-sessions` | 会话数据目录 |
 | `SEARCH_API_PROVIDER` | `mock` | 搜索工具 Provider |
+| `TINGWU_CONNECT_TIMEOUT_MS` | `20000` | 通义听悟连接超时，线上网络慢时可调大 |
+| `TINGWU_READ_TIMEOUT_MS` | `60000` | 通义听悟响应读取超时 |
+| `TINGWU_MAX_RETRIES` | `2` | 通义听悟连接/读取超时重试次数 |
 
 ## 测试
 

@@ -6,6 +6,9 @@ const DEFAULT_TINGWU_ENDPOINT = "tingwu.cn-beijing.aliyuncs.com";
 const DEFAULT_TINGWU_REGION = "cn-beijing";
 const DEFAULT_SOURCE_LANGUAGE = "cn";
 const DEFAULT_TRANSCRIPTION_OUTPUT_LEVEL = 1;
+const DEFAULT_CONNECT_TIMEOUT_MS = 20_000;
+const DEFAULT_READ_TIMEOUT_MS = 60_000;
+const DEFAULT_MAX_RETRIES = 2;
 
 type JsonObject = Record<string, unknown>;
 
@@ -84,7 +87,69 @@ function getTingwuEndpoint() {
   return readEnv("TINGWU_ENDPOINT") || DEFAULT_TINGWU_ENDPOINT;
 }
 
-async function callTingwuApi<T extends TingwuResponseBodyBase>(params: {
+function readPositiveIntEnv(name: string, defaultValue: number) {
+  const raw = Number.parseInt(readEnv(name), 10);
+
+  return Number.isFinite(raw) && raw > 0 ? raw : defaultValue;
+}
+
+function readNonNegativeIntEnv(name: string, defaultValue: number) {
+  const raw = Number.parseInt(readEnv(name), 10);
+
+  return Number.isFinite(raw) && raw >= 0 ? raw : defaultValue;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getErrorCode(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return "";
+  }
+
+  const code = (error as { code?: unknown }).code;
+
+  return typeof code === "string" ? code : "";
+}
+
+function getErrorName(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return "";
+  }
+
+  const name = (error as { name?: unknown }).name;
+
+  return typeof name === "string" ? name : "";
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isRetryableTransportError(error: unknown) {
+  const code = getErrorCode(error);
+  const name = getErrorName(error);
+  const message = getErrorMessage(error);
+
+  return (
+    [
+      "ConnectTimeout",
+      "ConnectionTimeout",
+      "ECONNRESET",
+      "EAI_AGAIN",
+      "ETIMEDOUT",
+      "ESOCKETTIMEDOUT",
+      "ReadTimeout",
+      "SocketTimeout",
+    ].includes(code) ||
+    /ConnectTimeout|ConnectionTimeout|ReadTimeout|SocketTimeout|ETIMEDOUT|ECONNRESET|EAI_AGAIN/i.test(
+      `${name} ${message}`,
+    )
+  );
+}
+
+function buildTingwuRequest(params: {
   body?: JsonObject;
   method: "GET" | "POST" | "PUT";
   pathname: string;
@@ -121,31 +186,94 @@ async function callTingwuApi<T extends TingwuResponseBodyBase>(params: {
     accessKeySecret,
   )}`;
 
-  const response = await $Tea.doAction(request, {
-    connectTimeout: 10_000,
-    readTimeout: 30_000,
-  });
+  return { endpoint, request };
+}
+
+function buildTingwuTransportError(params: {
+  attempts: number;
+  endpoint: string;
+  error: unknown;
+}) {
+  const detail = getErrorMessage(params.error);
+
+  return new Error(
+    `通义听悟接口连接超时或网络不可达：已尝试 ${params.attempts} 次仍无法连接 https://${params.endpoint}。请检查线上运行环境到阿里云听悟 endpoint 的出网连通性，或调整 TINGWU_CONNECT_TIMEOUT_MS / TINGWU_MAX_RETRIES 后重试。原始错误：${detail}`,
+  );
+}
+
+async function callTingwuApi<T extends TingwuResponseBodyBase>(params: {
+  body?: JsonObject;
+  method: "GET" | "POST" | "PUT";
+  pathname: string;
+  query?: Record<string, string>;
+}) {
+  const connectTimeout = readPositiveIntEnv(
+    "TINGWU_CONNECT_TIMEOUT_MS",
+    DEFAULT_CONNECT_TIMEOUT_MS,
+  );
+  const readTimeout = readPositiveIntEnv(
+    "TINGWU_READ_TIMEOUT_MS",
+    DEFAULT_READ_TIMEOUT_MS,
+  );
+  const maxRetries = readNonNegativeIntEnv("TINGWU_MAX_RETRIES", DEFAULT_MAX_RETRIES);
   let body: T | undefined;
+  let lastEndpoint = getTingwuEndpoint();
 
-  if (Util.is4xx(response.statusCode) || Util.is5xx(response.statusCode)) {
-    const errBody = await Util.readAsJSON(response.body).catch(async () => ({
-      Message: await Util.readAsString(response.body).catch(() => ""),
-    }));
-    const errMap = Util.assertAsMap(errBody);
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const { endpoint, request } = buildTingwuRequest(params);
+    lastEndpoint = endpoint;
 
-    throw new Error(
-      `${String(errMap.Code ?? "RequestFailed")}: code: ${
-        response.statusCode
-      }, ${String(errMap.Message ?? "请求失败")} request id: ${String(
-        errMap.RequestId ?? "",
-      )}`.trim(),
-    );
+    try {
+      const response = await $Tea.doAction(request, {
+        connectTimeout,
+        readTimeout,
+      });
+
+      if (Util.is4xx(response.statusCode) || Util.is5xx(response.statusCode)) {
+        const errBody = await Util.readAsJSON(response.body).catch(async () => ({
+          Message: await Util.readAsString(response.body).catch(() => ""),
+        }));
+        const errMap = Util.assertAsMap(errBody);
+
+        throw new Error(
+          `${String(errMap.Code ?? "RequestFailed")}: code: ${
+            response.statusCode
+          }, ${String(errMap.Message ?? "请求失败")} request id: ${String(
+            errMap.RequestId ?? "",
+          )}`.trim(),
+        );
+      }
+
+      body = Util.assertAsMap(await Util.readAsJSON(response.body)) as T;
+      break;
+    } catch (error) {
+      if (!isRetryableTransportError(error) || attempt >= maxRetries) {
+        if (isRetryableTransportError(error)) {
+          throw buildTingwuTransportError({
+            attempts: attempt + 1,
+            endpoint,
+            error,
+          });
+        }
+
+        throw error;
+      }
+
+      console.warn("[tingwu] 接口连接失败，准备重试", {
+        attempt: attempt + 1,
+        endpoint,
+        error: getErrorMessage(error),
+        maxRetries,
+        pathname: params.pathname,
+      });
+      await sleep(Math.min(1_000 * 2 ** attempt, 5_000));
+    }
   }
 
-  body = Util.assertAsMap(await Util.readAsJSON(response.body)) as T;
-
   if (!body) {
-    throw new Error("通义听悟返回了空响应");
+    throw new Error(
+      `通义听悟返回了空响应：endpoint=https://${lastEndpoint}${params.pathname}`,
+    );
   }
 
   if (

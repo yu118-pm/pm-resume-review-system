@@ -10,6 +10,11 @@ export interface CallLLMOptions {
   temperature?: number;
 }
 
+export interface LLMUserImageInput {
+  imageDataUrl: string;
+  text: string;
+}
+
 export interface LLMCallResult {
   content: string;
   finishReason: string | null;
@@ -105,6 +110,59 @@ export async function callLLM(
   const result = await callLLMWithMeta(systemPrompt, userPrompt, options);
 
   return result.content;
+}
+
+export async function callLLMWithImage(
+  systemPrompt: string,
+  input: LLMUserImageInput,
+  options: CallLLMOptions = {},
+) {
+  const { apiKey, baseURL, model } = resolveLLMConfig({
+    model: options.model,
+  });
+
+  if (!apiKey) {
+    throw new Error("缺少模型 API Key，请配置 DASHSCOPE_API_KEY 或 OPENAI_API_KEY");
+  }
+
+  const client = new OpenAI({
+    apiKey,
+    baseURL,
+  });
+
+  const request: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: input.text,
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: input.imageDataUrl,
+            },
+          },
+        ] as OpenAI.Chat.ChatCompletionContentPart[],
+      },
+    ],
+    temperature: options.temperature ?? 0.2,
+    max_tokens: options.maxTokens ?? 4096,
+    stream: false,
+  };
+
+  if (options.responseFormat === "json_object") {
+    request.response_format = {
+      type: "json_object",
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming["response_format"];
+  }
+
+  const response = await client.chat.completions.create(request);
+  return response.choices[0]?.message?.content ?? "";
 }
 
 export function getModelConfig() {

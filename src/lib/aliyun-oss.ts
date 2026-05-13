@@ -28,6 +28,24 @@ function getSignedUrlExpires() {
   return raw;
 }
 
+function getOssErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (/Access Key Id you provided does not exist/i.test(message)) {
+    return "当前配置的 OSS AccessKey 无效或已失效，请检查 OSS_ACCESS_KEY_ID / ALIBABA_CLOUD_ACCESS_KEY_ID";
+  }
+
+  if (/InvalidAccessKeyId/i.test(message)) {
+    return "当前配置的 OSS AccessKey 无效，请检查 OSS_ACCESS_KEY_ID / ALIBABA_CLOUD_ACCESS_KEY_ID";
+  }
+
+  if (/SignatureDoesNotMatch/i.test(message)) {
+    return "OSS 鉴权签名失败，请检查 AccessKey Secret 是否正确";
+  }
+
+  return message;
+}
+
 function sanitizeFileName(fileName: string) {
   const ext = path.extname(fileName).toLowerCase();
   const basename = path
@@ -70,6 +88,45 @@ function getOssClient() {
   });
 }
 
+export function getOssConfigSummary() {
+  const accessKeyId = readEnv("OSS_ACCESS_KEY_ID") || readEnv("ALIBABA_CLOUD_ACCESS_KEY_ID");
+  const accessKeySecret =
+    readEnv("OSS_ACCESS_KEY_SECRET") || readEnv("ALIBABA_CLOUD_ACCESS_KEY_SECRET");
+  const region = readEnv("OSS_REGION");
+  const bucket = readEnv("OSS_BUCKET");
+  const endpoint = readEnv("OSS_ENDPOINT");
+
+  return {
+    hasAccessKeyId: Boolean(accessKeyId),
+    hasAccessKeySecret: Boolean(accessKeySecret),
+    region,
+    bucket,
+    endpoint,
+  };
+}
+
+export async function checkOssAccess() {
+  const client = getOssClient();
+
+  try {
+    await client.listV2({
+      prefix: "temp/",
+      "max-keys": 1,
+    });
+
+    return {
+      ok: true as const,
+      message: "OSS 连接正常",
+    };
+  } catch (error) {
+    return {
+      ok: false as const,
+      message: getOssErrorMessage(error),
+      rawMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function uploadHomeworkReviewSourceFile(input: {
   file: File;
   taskId: string;
@@ -88,9 +145,7 @@ export async function uploadHomeworkReviewSourceFile(input: {
       mime: input.file.type || undefined,
     });
   } catch (error) {
-    throw new Error(
-      `上传 OSS 失败：${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw new Error(`上传 OSS 失败：${getOssErrorMessage(error)}`);
   }
 
   const expires = getSignedUrlExpires();

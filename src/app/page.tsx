@@ -13,6 +13,8 @@ export default async function HomePage({
       ? "pmReview"
       : toolValue === "homework-review"
         ? "homeworkReview"
+        : toolValue === "interview-review"
+          ? "interviewReview"
         : "optimize";
 
   return <Workbench initialTool={initialTool} />;

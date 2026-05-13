@@ -19,13 +19,14 @@ import type {
   TemplateResumeData,
 } from "@/lib/types";
 import { HomeworkReviewPage } from "@/components/homework-review/HomeworkReviewPage";
+import { InterviewReviewPage } from "@/components/interview-review/InterviewReviewPage";
 import { PmReviewPage } from "@/components/pm-review/PmReviewPage";
 
 type ActiveTab = "resume" | "notes";
-type ToolMode = "optimize" | "pmReview" | "homeworkReview";
+type ToolMode = "optimize" | "pmReview" | "homeworkReview" | "interviewReview";
 
 const TOOLS: Array<{
-  key: ToolMode | "jd" | "coverLetter" | "interview" | "crm";
+  key: ToolMode | "jd" | "coverLetter" | "crm";
   name: string;
   description: string;
   active: boolean;
@@ -33,9 +34,9 @@ const TOOLS: Array<{
     { key: "optimize", name: "简历优化", description: "目标岗位重写", active: true },
     { key: "pmReview", name: "PM 简历批阅", description: "DOCX 批注输出", active: true },
     { key: "homeworkReview", name: "作业批阅", description: "音视频讲解稿", active: true },
+    { key: "interviewReview", name: "面试复盘", description: "逐题问答分析", active: true },
     { key: "jd", name: "JD 拆解", description: "即将上线", active: false },
     { key: "coverLetter", name: "求职信生成", description: "即将上线", active: false },
-    { key: "interview", name: "面试准备", description: "即将上线", active: false },
     { key: "crm", name: "候选人记录", description: "即将上线", active: false },
   ];
 
@@ -306,13 +307,16 @@ export function Workbench({
                   ? "/?tool=pm-review"
                   : tool.key === "homeworkReview"
                     ? "/?tool=homework-review"
+                    : tool.key === "interviewReview"
+                      ? "/?tool=interview-review"
                   : tool.key === "optimize"
                     ? "/"
                     : null;
               const targetTool =
                 tool.key === "pmReview" ||
                 tool.key === "optimize" ||
-                tool.key === "homeworkReview"
+                tool.key === "homeworkReview" ||
+                tool.key === "interviewReview"
                   ? tool.key
                   : null;
 
@@ -588,6 +592,7 @@ export function Workbench({
 
         {activeTool === "pmReview" ? <PmReviewPage /> : null}
         {activeTool === "homeworkReview" ? <HomeworkReviewPage /> : null}
+        {activeTool === "interviewReview" ? <InterviewReviewPage /> : null}
       </section>
 
       {previewPayload ? (

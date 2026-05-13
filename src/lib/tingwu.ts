@@ -324,7 +324,33 @@ function buildCreateTaskParameters() {
 export async function createTingwuOfflineTask(params: {
   fileUrl: string;
   taskKey: string;
+  diarizationEnabled?: boolean;
+  speakerCount?: number;
+  outputLevel?: 1 | 2;
 }) {
+  const parameters = buildCreateTaskParameters();
+
+  if (typeof params.diarizationEnabled === "boolean") {
+    const transcription =
+      (parameters.Transcription as JsonObject | undefined) ?? {};
+    transcription.DiarizationEnabled = params.diarizationEnabled;
+
+    if (params.diarizationEnabled) {
+      transcription.Diarization = {
+        SpeakerCount:
+          typeof params.speakerCount === "number" && params.speakerCount >= 0
+            ? params.speakerCount
+            : 0,
+      };
+    }
+
+    if (params.outputLevel) {
+      transcription.OutputLevel = params.outputLevel;
+    }
+
+    parameters.Transcription = transcription;
+  }
+
   const body = await callTingwuApi<TingwuCreateTaskResponseBody>({
     body: {
       AppKey: getRequiredEnv("TINGWU_APP_KEY"),
@@ -333,7 +359,7 @@ export async function createTingwuOfflineTask(params: {
         SourceLanguage: readEnv("TINGWU_SOURCE_LANGUAGE") || DEFAULT_SOURCE_LANGUAGE,
         TaskKey: params.taskKey,
       },
-      Parameters: buildCreateTaskParameters(),
+      Parameters: parameters,
     },
     method: "PUT",
     pathname: "/openapi/tingwu/v2/tasks",

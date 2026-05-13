@@ -84,8 +84,9 @@ export async function submitInterviewAudioTask(file: File) {
   const tingwuTask = await createTingwuOfflineTask({
     fileUrl: upload.signedUrl,
     taskKey: taskId,
-    diarizationEnabled: false,
-    outputLevel: 1,
+    diarizationEnabled: true,
+    speakerCount: 0,
+    outputLevel: 2,
   });
 
   const task: InterviewAudioTaskState = {

@@ -57,7 +57,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const qaPairs = buildInterviewQaPairs(rawQaText);
+    const qaPairs = await buildInterviewQaPairs(rawQaText);
     const result = await analyzeInterviewText({
       studentName: student.name,
       targetRole: body.targetRole?.trim() || "",

@@ -5,6 +5,23 @@ import { getLLMConfigSummary } from "@/lib/openai";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 export async function GET() {
   const ossConfig = getOssConfigSummary();
   const llmConfig = getLLMConfigSummary();
@@ -13,7 +30,15 @@ export async function GET() {
     ossConfig.hasAccessKeySecret &&
     Boolean(ossConfig.region) &&
     Boolean(ossConfig.bucket)
-      ? await checkOssAccess()
+      ? await withTimeout(
+          checkOssAccess(),
+          5_000,
+          {
+            ok: false as const,
+            message: "OSS 连通性检查超时，请重点检查 region、bucket 和网络放行",
+            rawMessage: "timeout",
+          },
+        )
       : {
           ok: false as const,
           message: "OSS 相关环境变量不完整",

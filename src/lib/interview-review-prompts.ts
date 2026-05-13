@@ -104,6 +104,34 @@ questionType 只能从以下值中选择：
 - items 的顺序必须与输入问答顺序一致。
 - 每个 item 的 id 必须沿用输入 id。`;
 
+export const INTERVIEW_QA_EXTRACTION_SYSTEM_PROMPT = `你是一位中文面试记录整理助手。
+
+你的任务是基于用户提供的原始面试文本，提取出尽可能合理的“问题-回答”对。
+
+要求：
+- 输入文本可能是标准的“问/答”格式，也可能只是普通转写稿、带发言者标识的语音文稿、聊天记录或零散笔记。
+- 不要要求用户必须按固定格式提供材料。
+- 如果文本中能识别出面试官问题和学员回答，就整理成结构化问答。
+- 如果有说话人标识，例如“发言者1：”“面试官：”“候选人：”，要利用这些信息判断问答关系。
+- 如果没有明确说话人，但能从语义判断哪句是在提问，也可以提取。
+- 如果一个问题后面跟着多段连续回答，应合并为同一题的回答。
+- 如果识别到追问，可以按独立题目拆分，也可以在必要时和上一题合并，但必须尽量贴近真实问答。
+- 如果某个问题没有明确回答，answer 保留空字符串。
+- 只能整理原文，不要补写原文没有的信息。
+- 必须输出严格 JSON，不要输出 Markdown，不要输出解释。
+
+输出格式：
+{
+  "qaPairs": [
+    {
+      "id": "qa_1",
+      "question": "提取后的问题",
+      "answer": "提取后的回答",
+      "sourceSegmentIds": []
+    }
+  ]
+}`;
+
 export function buildInterviewReviewUserPrompt(params: {
   studentName: string;
   targetRole: string;
@@ -180,4 +208,17 @@ ${JSON.stringify(params.qaPairs, null, 2)}
 8. referenceAnswer 必须是自然口语化的面试回答，不要写成报告、作文或课程讲义。
 9. overallConclusion 要像老师给内部复盘的结论，不要写成空泛鼓励语。
 10. 输出必须是严格 JSON，不要输出 Markdown，不要输出代码块，不要输出额外说明。`;
+}
+
+export function buildInterviewQaExtractionUserPrompt(rawQaText: string) {
+  return `请从下面这段原始面试文本中提取问答对。
+
+注意：
+- 用户提供的文本不一定是标准问答格式。
+- 只要能识别出合理的问题和回答，就应该整理出来。
+- 如果能识别说话人，请结合说话人判断谁在提问、谁在回答。
+- 如果有问题没有明确回答，answer 输出空字符串即可。
+
+原始文本如下：
+${rawQaText}`;
 }

@@ -146,7 +146,9 @@ async function syncInterviewAudioTask(task: InterviewAudioTaskState) {
       return task;
     }
 
-    task.transcribedText = await fetchTingwuTranscriptionText(task.transcriptionResultUrl);
+    task.transcribedText = await fetchTingwuTranscriptionText(task.transcriptionResultUrl, {
+      includeSpeakerLabels: true,
+    });
     task.status = "completed";
     task.message = "录音转写完成，请检查文本后再分析";
     task.error = undefined;

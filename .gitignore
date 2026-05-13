@@ -7,3 +7,4 @@ yarn-error.log*
 pnpm-debug.log*
 data/review-sessions/
 data/homework-review/
+.vercel

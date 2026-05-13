@@ -462,6 +462,36 @@ function buildTextFromParagraph(paragraph: unknown) {
   return buildTextFromWords(asArray(item.Words ?? item.words)).trim();
 }
 
+function readSpeakerId(paragraph: unknown) {
+  const item = asObject(paragraph);
+
+  if (!item) {
+    return "";
+  }
+
+  const candidates = [
+    item.SpeakerId,
+    item.speakerId,
+    item.Speaker,
+    item.speaker,
+    item.ChannelId,
+    item.channelId,
+  ];
+
+  for (const candidate of candidates) {
+    const value = readText(candidate);
+    if (value) {
+      return value;
+    }
+
+    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+      return String(candidate);
+    }
+  }
+
+  return "";
+}
+
 function findParagraphs(payload: JsonObject) {
   const candidates = [
     payload.Transcription,
@@ -488,12 +518,25 @@ function findParagraphs(payload: JsonObject) {
   return [];
 }
 
-function extractTranscriptText(payload: JsonObject) {
+function extractTranscriptText(payload: JsonObject, options?: { includeSpeakerLabels?: boolean }) {
   const paragraphs = findParagraphs(payload);
   const paragraphTexts =
     paragraphs.length > 0
       ? paragraphs
-          .map((paragraph) => buildTextFromParagraph(paragraph))
+          .map((paragraph) => {
+            const text = buildTextFromParagraph(paragraph);
+
+            if (!text) {
+              return "";
+            }
+
+            if (!options?.includeSpeakerLabels) {
+              return text;
+            }
+
+            const speakerId = readSpeakerId(paragraph);
+            return speakerId ? `发言者${speakerId}：${text}` : text;
+          })
           .filter(Boolean)
       : [];
   const deduped = paragraphTexts.filter(
@@ -519,7 +562,10 @@ function extractTranscriptText(payload: JsonObject) {
   throw new Error("通义听悟转写结果中未找到可用文本");
 }
 
-export async function fetchTingwuTranscriptionText(url: string) {
+export async function fetchTingwuTranscriptionText(
+  url: string,
+  options?: { includeSpeakerLabels?: boolean },
+) {
   const response = await fetch(url, {
     cache: "no-store",
   });
@@ -552,7 +598,7 @@ export async function fetchTingwuTranscriptionText(url: string) {
     throw new Error("通义听悟转写结果结构异常");
   }
 
-  return extractTranscriptText(root)
+  return extractTranscriptText(root, options)
     .replace(/\r\n/g, "\n")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")

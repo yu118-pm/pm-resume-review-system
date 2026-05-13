@@ -1,7 +1,13 @@
+import { z } from "zod";
 import { callLLM, callLLMWithImage } from "@/lib/openai";
-import { parseInterviewQaText } from "@/lib/interview-review-parser";
 import {
+  looksLikeStructuredQaText,
+  parseInterviewQaText,
+} from "@/lib/interview-review-parser";
+import {
+  buildInterviewQaExtractionUserPrompt,
   buildInterviewReviewUserPrompt,
+  INTERVIEW_QA_EXTRACTION_SYSTEM_PROMPT,
   INTERVIEW_REVIEW_SYSTEM_PROMPT,
 } from "@/lib/interview-review-prompts";
 import {
@@ -9,6 +15,17 @@ import {
   type InterviewQaPair,
   type InterviewReviewResult,
 } from "@/lib/interview-review-types";
+
+const interviewQaExtractionSchema = z.object({
+  qaPairs: z.array(
+    z.object({
+      id: z.string().min(1),
+      question: z.string().min(1),
+      answer: z.string(),
+      sourceSegmentIds: z.array(z.string()).default([]),
+    }),
+  ),
+});
 
 function stripCodeFence(raw: string) {
   return raw
@@ -22,6 +39,12 @@ function parseReviewResult(raw: string) {
   const normalized = stripCodeFence(raw);
   const parsed = JSON.parse(normalized) as unknown;
   return interviewReviewResultSchema.parse(parsed);
+}
+
+function parseQaExtractionResult(raw: string) {
+  const normalized = stripCodeFence(raw);
+  const parsed = JSON.parse(normalized) as unknown;
+  return interviewQaExtractionSchema.parse(parsed);
 }
 
 function normalizeReviewResult(
@@ -54,14 +77,36 @@ function normalizeReviewResult(
   return result;
 }
 
-export function buildInterviewQaPairs(rawQaText: string) {
+export async function buildInterviewQaPairs(rawQaText: string) {
   const qaPairs = parseInterviewQaText(rawQaText);
 
-  if (qaPairs.length === 0) {
-    throw new Error("未识别到有效的面试问答，请按“问：...\\n答：...”格式整理后重试");
+  if (qaPairs.length > 0 && looksLikeStructuredQaText(rawQaText)) {
+    return qaPairs;
   }
 
-  return qaPairs;
+  const raw = await callLLM(
+    INTERVIEW_QA_EXTRACTION_SYSTEM_PROMPT,
+    buildInterviewQaExtractionUserPrompt(rawQaText),
+    {
+      responseFormat: "json_object",
+      temperature: 0.1,
+      maxTokens: 4096,
+    },
+  );
+  const extracted = parseQaExtractionResult(raw).qaPairs
+    .map((item, index) => ({
+      id: `qa_${index + 1}`,
+      question: item.question.trim(),
+      answer: item.answer.trim(),
+      sourceSegmentIds: item.sourceSegmentIds ?? [],
+    }))
+    .filter((item) => item.question);
+
+  if (extracted.length === 0) {
+    throw new Error("未能从当前文本中提取出有效的面试问答，请检查转写内容是否完整");
+  }
+
+  return extracted;
 }
 
 export async function analyzeInterviewText(params: {

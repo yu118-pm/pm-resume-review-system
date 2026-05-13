@@ -516,12 +516,12 @@ export function InterviewReviewPage() {
       </header>
 
       <section className="card unified-card">
-        <div className="card-header unified-header">
-          <div>
-            <h3>复盘输入</h3>
-            <p>先选学员和简历，再补充 JD，最后选择文本或录音模式执行分析。</p>
+          <div className="card-header unified-header">
+            <div>
+              <h3>复盘输入</h3>
+            <p>先选学员和简历，再补充 JD，最后选择文本或录音模式执行分析。文本不要求必须手动整理成固定问答格式。</p>
+            </div>
           </div>
-        </div>
 
         <div className="unified-fields">
           <div className="field-block">
@@ -771,7 +771,7 @@ export function InterviewReviewPage() {
               placeholder={
                 inputMode === "audio"
                   ? "录音转写完成后会自动回填到这里，你可以手动修正后再分析。"
-                  : "示例：\n问：请介绍一下你最近做过的项目\n答：我最近做的是一个 B 端系统项目...\n\n问：你在里面具体负责什么？\n答：..."
+                  : "可以直接粘贴普通转写稿、聊天记录、带发言者的语音文稿，或已经整理好的问答内容。示例：\n问：请介绍一下你最近做过的项目\n答：我最近做的是一个 B 端系统项目..."
               }
               value={rawQaText}
               onChange={(event) => setRawQaText(event.target.value)}

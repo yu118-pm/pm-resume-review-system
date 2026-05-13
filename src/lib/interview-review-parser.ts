@@ -25,6 +25,15 @@ function isAnswerLine(line: string) {
   return ANSWER_PREFIXES.some((prefix) => line.startsWith(prefix));
 }
 
+export function looksLikeStructuredQaText(rawQaText: string) {
+  const lines = rawQaText
+    .split("\n")
+    .map(trimLine)
+    .filter(Boolean);
+
+  return lines.some((line) => isQuestionLine(line)) && lines.some((line) => isAnswerLine(line));
+}
+
 export function parseInterviewQaText(rawQaText: string): InterviewQaPair[] {
   const lines = rawQaText
     .split("\n")

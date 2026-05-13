@@ -74,7 +74,7 @@ export async function submitInterviewAudioTask(file: File) {
     updatedAt: nowIso(),
     processing: false,
   };
-  setInterviewAudioTask(baseTask);
+  await setInterviewAudioTask(baseTask);
 
   const upload = await uploadHomeworkReviewSourceFile({
     file,
@@ -97,7 +97,7 @@ export async function submitInterviewAudioTask(file: File) {
     tingwuTaskStatus: tingwuTask.taskStatus,
     ossObjectKey: upload.objectKey,
   };
-  setInterviewAudioTask(task);
+  await setInterviewAudioTask(task);
 
   return toPayload(task);
 }
@@ -113,7 +113,7 @@ async function syncInterviewAudioTask(task: InterviewAudioTaskState) {
 
   task.processing = true;
   task.updatedAt = nowIso();
-  setInterviewAudioTask(task);
+  await setInterviewAudioTask(task);
 
   try {
     const tingwuTask = await getTingwuTaskInfo(task.tingwuTaskId);
@@ -126,14 +126,14 @@ async function syncInterviewAudioTask(task: InterviewAudioTaskState) {
       task.message = "录音转写失败";
       task.error = tingwuTask.errorMessage || "录音转写失败";
       await cleanupSourceFile(task);
-      setInterviewAudioTask(task);
+      await setInterviewAudioTask(task);
       return task;
     }
 
     if (tingwuTask.taskStatus !== "COMPLETED") {
       task.status = "transcribing";
       task.message = "录音转写中，请稍后";
-      setInterviewAudioTask(task);
+      await setInterviewAudioTask(task);
       return task;
     }
 
@@ -142,7 +142,7 @@ async function syncInterviewAudioTask(task: InterviewAudioTaskState) {
       task.message = "录音转写失败";
       task.error = "通义听悟已完成，但未返回转写结果";
       await cleanupSourceFile(task);
-      setInterviewAudioTask(task);
+      await setInterviewAudioTask(task);
       return task;
     }
 
@@ -153,17 +153,17 @@ async function syncInterviewAudioTask(task: InterviewAudioTaskState) {
     task.message = "录音转写完成，请检查文本后再分析";
     task.error = undefined;
     await cleanupSourceFile(task);
-    setInterviewAudioTask(task);
+    await setInterviewAudioTask(task);
     return task;
   } finally {
     task.processing = false;
     task.updatedAt = nowIso();
-    setInterviewAudioTask(task);
+    await setInterviewAudioTask(task);
   }
 }
 
 export async function getInterviewAudioTaskPayload(taskId: string) {
-  const task = getInterviewAudioTask(taskId);
+  const task = await getInterviewAudioTask(taskId);
 
   if (!task) {
     throw new Error("转写任务不存在");

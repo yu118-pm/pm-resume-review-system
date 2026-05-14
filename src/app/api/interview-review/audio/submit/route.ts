@@ -13,6 +13,20 @@ function jsonError(message: string, status: number) {
   );
 }
 
+function resolveAudioSubmitErrorStatus(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (
+    message.includes("通义听悟当日音视频文件转写试用额度已用完") ||
+    message.includes("通义听悟单个音视频文件时长超限") ||
+    message.includes("通义听悟单个音视频文件大小超限")
+  ) {
+    return 429;
+  }
+
+  return 400;
+}
+
 export async function POST(request: Request) {
   const formData = await request.formData().catch(() => null);
 
@@ -36,7 +50,7 @@ export async function POST(request: Request) {
     console.error("[api/interview-review/audio/submit] 提交失败", error);
     return jsonError(
       error instanceof Error ? error.message : "录音转写任务提交失败",
-      400,
+      resolveAudioSubmitErrorStatus(error),
     );
   }
 }

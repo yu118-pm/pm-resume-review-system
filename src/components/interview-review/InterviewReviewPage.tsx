@@ -26,6 +26,12 @@ import type {
 type InterviewInputMode = "text" | "audio";
 type UploadZoneKind = "resume" | "jdImage" | "audio" | null;
 
+const DEFAULT_AUDIO_MAX_DURATION_MINUTES = 120;
+const AUDIO_MAX_DURATION_MINUTES =
+  Number.parseInt(process.env.NEXT_PUBLIC_INTERVIEW_AUDIO_MAX_DURATION_MINUTES || "", 10) ||
+  DEFAULT_AUDIO_MAX_DURATION_MINUTES;
+const AUDIO_MAX_DURATION_SECONDS = AUDIO_MAX_DURATION_MINUTES * 60;
+
 function formatDateTime(value?: string) {
   if (!value) {
     return null;
@@ -51,6 +57,19 @@ function readFileNameFromDisposition(header: string | null) {
 
   const basicMatch = header.match(/filename="?([^"]+)"?/i);
   return basicMatch?.[1] ?? null;
+}
+
+function formatDuration(seconds: number) {
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainSeconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}小时${minutes}分${remainSeconds}秒`;
+  }
+
+  return `${minutes}分${remainSeconds}秒`;
 }
 
 function openFilePicker(inputRef: RefObject<HTMLInputElement | null>) {
@@ -122,6 +141,41 @@ async function dataUrlToCompressedJpeg(
   return canvas.toDataURL("image/jpeg", options.quality);
 }
 
+async function readMediaDuration(file: File) {
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const element = document.createElement(
+      file.type.startsWith("video/") ? "video" : "audio",
+    ) as HTMLMediaElement;
+
+    element.preload = "metadata";
+    element.src = objectUrl;
+
+    const duration = await new Promise<number>((resolve, reject) => {
+      element.onloadedmetadata = () => {
+        const nextDuration = Number.isFinite(element.duration) ? element.duration : NaN;
+
+        if (!Number.isFinite(nextDuration) || nextDuration <= 0) {
+          reject(new Error("无法识别录音时长，请换一个文件重试"));
+          return;
+        }
+
+        resolve(nextDuration);
+      };
+
+      element.onerror = () => reject(new Error("无法读取录音时长，请换一个文件重试"));
+    });
+
+    element.removeAttribute("src");
+    element.load();
+
+    return duration;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 export function InterviewReviewPage() {
   const resumeFileInputRef = useRef<HTMLInputElement | null>(null);
   const jdImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -147,6 +201,7 @@ export function InterviewReviewPage() {
   const [inputMode, setInputMode] = useState<InterviewInputMode>("text");
   const [rawQaText, setRawQaText] = useState("");
   const [audioTask, setAudioTask] = useState<InterviewAudioTaskPayload | null>(null);
+  const [audioDurationSeconds, setAudioDurationSeconds] = useState<number | null>(null);
   const [review, setReview] = useState<InterviewReviewRecord | null>(null);
 
   const selectedStudent =
@@ -409,9 +464,19 @@ export function InterviewReviewPage() {
     setError(null);
     setMessage(null);
     setAudioTask(null);
+    setAudioDurationSeconds(null);
     clearAudioPoll();
 
     try {
+      const durationSeconds = await readMediaDuration(file);
+
+      if (durationSeconds > AUDIO_MAX_DURATION_SECONDS) {
+        throw new Error(
+          `当前录音时长约 ${formatDuration(durationSeconds)}，超过系统当前允许的 ${AUDIO_MAX_DURATION_MINUTES} 分钟上限。为避免通义听悟额度或时长限制导致反复失败，请先拆分录音后再上传，或直接粘贴转写文本进行分析。`,
+        );
+      }
+
+      setAudioDurationSeconds(durationSeconds);
       const formData = new FormData();
       formData.append("file", file);
 
@@ -429,7 +494,7 @@ export function InterviewReviewPage() {
 
       setAudioTask(data.task);
       setRawQaText("");
-      setMessage(`已上传录音 ${file.name}，正在转写`);
+      setMessage(`已上传录音 ${file.name}（约 ${formatDuration(durationSeconds)}），正在转写`);
       void pollAudioTask(data.task.taskId);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "录音转写提交失败");
@@ -799,7 +864,14 @@ export function InterviewReviewPage() {
                   </div>
                 </div>
               </div>
-              {audioTask ? <div className="inline-message">{`${audioTask.fileName} · ${audioTask.message}`}</div> : null}
+              <p className="form-note">{`当前系统默认按 ${AUDIO_MAX_DURATION_MINUTES} 分钟上限预检录音，超长文件请先拆分后上传。`}</p>
+              {audioTask ? (
+                <div className="inline-message">
+                  {`${audioTask.fileName} · ${audioTask.message}${
+                    audioDurationSeconds ? ` · 时长约 ${formatDuration(audioDurationSeconds)}` : ""
+                  }`}
+                </div>
+              ) : null}
             </div>
           ) : null}
 

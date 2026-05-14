@@ -127,6 +127,25 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function normalizeTingwuApiErrorMessage(message: string) {
+  if (
+    message.includes("PRE.AudioDurationQuotaLimit") ||
+    message.includes("Audio duration exceed quota limit")
+  ) {
+    return "通义听悟当日音视频文件转写试用额度已用完。阿里云官方说明为：免费版每天最多转写 2 小时音频时长，超出后需等待 24 小时重置，或升级到商用版后继续使用。当前建议先切换到“直接输入文本”模式，或升级听悟商用版。";
+  }
+
+  if (message.includes("TSC.AudioDuration") || message.includes("Audio duration exceeded")) {
+    return "通义听悟单个音视频文件时长超限。阿里云官方限制为单个文件最长 6 小时，请拆分后再上传，或改为直接输入文本分析。";
+  }
+
+  if (message.includes("TSC.AudioFileSize") || message.includes("Audio file size exceeded")) {
+    return "通义听悟单个音视频文件大小超限。阿里云官方限制为单个文件不超过 6GB，请压缩或拆分后再上传。";
+  }
+
+  return message;
+}
+
 function isRetryableTransportError(error: unknown) {
   const code = getErrorCode(error);
   const name = getErrorName(error);
@@ -236,11 +255,13 @@ async function callTingwuApi<T extends TingwuResponseBodyBase>(params: {
         const errMap = Util.assertAsMap(errBody);
 
         throw new Error(
+          normalizeTingwuApiErrorMessage(
           `${String(errMap.Code ?? "RequestFailed")}: code: ${
             response.statusCode
           }, ${String(errMap.Message ?? "请求失败")} request id: ${String(
             errMap.RequestId ?? "",
           )}`.trim(),
+          ),
         );
       }
 
@@ -281,7 +302,7 @@ async function callTingwuApi<T extends TingwuResponseBodyBase>(params: {
     String(body.Code).trim() !== "" &&
     String(body.Code) !== "0"
   ) {
-    throw new Error(body.Message || "通义听悟接口调用失败");
+    throw new Error(normalizeTingwuApiErrorMessage(body.Message || "通义听悟接口调用失败"));
   }
 
   return body;

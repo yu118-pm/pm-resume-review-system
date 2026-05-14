@@ -14,6 +14,9 @@ import type {
 import type { ApiErrorResponse } from "@/lib/types";
 import { getLLMErrorInfo } from "@/lib/openai";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 function jsonError(message: string, status: number) {
   return NextResponse.json<ApiErrorResponse>(
     { success: false, error: message },

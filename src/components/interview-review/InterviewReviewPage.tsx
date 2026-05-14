@@ -85,6 +85,43 @@ function fileToDataUrl(file: File) {
   });
 }
 
+async function dataUrlToCompressedJpeg(
+  dataUrl: string,
+  options: {
+    maxWidth: number;
+    maxHeight: number;
+    quality: number;
+  },
+) {
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("图片读取失败"));
+    img.src = dataUrl;
+  });
+
+  const scale = Math.min(
+    1,
+    options.maxWidth / image.width,
+    options.maxHeight / image.height,
+  );
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("图片处理失败");
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+
+  return canvas.toDataURL("image/jpeg", options.quality);
+}
+
 export function InterviewReviewPage() {
   const resumeFileInputRef = useRef<HTMLInputElement | null>(null);
   const jdImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -308,7 +345,12 @@ export function InterviewReviewPage() {
 
     try {
       const dataUrl = await fileToDataUrl(file);
-      setJdImageDataUrl(dataUrl);
+      const optimizedDataUrl = await dataUrlToCompressedJpeg(dataUrl, {
+        maxWidth: 1600,
+        maxHeight: 1600,
+        quality: 0.82,
+      });
+      setJdImageDataUrl(optimizedDataUrl);
       setJdImageName(file.name);
       setMessage(`已附加 JD 图片 ${file.name}，分析时会直接交给 AI 处理`);
     } catch (prepareError) {

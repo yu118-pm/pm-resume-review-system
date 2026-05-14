@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { callLLM, callLLMWithImage } from "@/lib/openai";
+import { callLLM, callLLMWithImage, isLLMConnectionError } from "@/lib/openai";
 import {
   looksLikeStructuredQaText,
   parseInterviewQaText,
@@ -118,8 +118,11 @@ export async function analyzeInterviewText(params: {
   qaPairs: InterviewQaPair[];
 }) {
   const userPrompt = buildInterviewReviewUserPrompt(params);
-  const raw = params.jdImageDataUrl
-    ? await callLLMWithImage(
+  let raw: string;
+
+  if (params.jdImageDataUrl) {
+    try {
+      raw = await callLLMWithImage(
         INTERVIEW_REVIEW_SYSTEM_PROMPT,
         {
           imageDataUrl: params.jdImageDataUrl,
@@ -130,12 +133,30 @@ export async function analyzeInterviewText(params: {
           temperature: 0.2,
           maxTokens: 8192,
         },
-      )
-    : await callLLM(INTERVIEW_REVIEW_SYSTEM_PROMPT, userPrompt, {
+      );
+    } catch (error) {
+      if (!isLLMConnectionError(error)) {
+        throw error;
+      }
+
+      console.warn("[interview-review] 多模态分析连接失败，退回文本分析", {
+        cause: error instanceof Error ? error.message : String(error),
+      });
+
+      raw = await callLLM(INTERVIEW_REVIEW_SYSTEM_PROMPT, userPrompt, {
         responseFormat: "json_object",
         temperature: 0.2,
         maxTokens: 8192,
       });
+    }
+  } else {
+    raw = await callLLM(INTERVIEW_REVIEW_SYSTEM_PROMPT, userPrompt, {
+      responseFormat: "json_object",
+      temperature: 0.2,
+      maxTokens: 8192,
+    });
+  }
+
   const parsed = parseReviewResult(raw);
 
   return normalizeReviewResult(parsed, params.qaPairs, Boolean(params.jdText.trim()));

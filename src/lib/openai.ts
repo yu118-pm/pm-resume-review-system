@@ -49,6 +49,15 @@ function resolveLLMConfig(overrides?: { model?: string }) {
   return { apiKey, baseURL, model };
 }
 
+function createClient(apiKey: string, baseURL: string) {
+  return new OpenAI({
+    apiKey,
+    baseURL,
+    timeout: 120_000,
+    maxRetries: 2,
+  });
+}
+
 function isContextLengthError(message: string) {
   const normalized = message.toLowerCase();
 
@@ -72,10 +81,7 @@ export async function callLLMWithMeta(
     throw new Error("缺少模型 API Key，请配置 DASHSCOPE_API_KEY 或 OPENAI_API_KEY");
   }
 
-  const client = new OpenAI({
-    apiKey,
-    baseURL,
-  });
+  const client = createClient(apiKey, baseURL);
 
   const request: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
     model,
@@ -125,10 +131,7 @@ export async function callLLMWithImage(
     throw new Error("缺少模型 API Key，请配置 DASHSCOPE_API_KEY 或 OPENAI_API_KEY");
   }
 
-  const client = new OpenAI({
-    apiKey,
-    baseURL,
-  });
+  const client = createClient(apiKey, baseURL);
 
   const request: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
     model,
@@ -280,4 +283,8 @@ export function getLLMErrorInfo(error: unknown): LLMErrorInfo | null {
   }
 
   return null;
+}
+
+export function isLLMConnectionError(error: unknown) {
+  return error instanceof OpenAI.APIConnectionError;
 }

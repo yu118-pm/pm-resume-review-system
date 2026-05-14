@@ -200,7 +200,7 @@ async function finalizeHomeworkReview(task: HomeworkReviewTaskState) {
 
   task.processing = true;
   task.updatedAt = nowIso();
-  setHomeworkReviewTask(task);
+  await setHomeworkReviewTask(task);
 
   try {
     const review = await generateHomeworkReview(task);
@@ -229,7 +229,7 @@ async function finalizeHomeworkReview(task: HomeworkReviewTaskState) {
     task.processing = false;
     task.updatedAt = nowIso();
     await cleanupTaskSourceFile(task);
-    setHomeworkReviewTask(task);
+    await setHomeworkReviewTask(task);
   }
 
   return task;
@@ -255,7 +255,7 @@ function buildBaseTask(input: {
   };
 }
 
-function createMockTask(input: {
+async function createMockTask(input: {
   fileName: string;
   fileSize: number;
   question: HomeworkQuestion;
@@ -279,7 +279,7 @@ function createMockTask(input: {
     transcriptionReadyAt: Date.now() + MOCK_TRANSCRIPTION_DELAY_MS,
   };
 
-  setHomeworkReviewTask(task);
+  await setHomeworkReviewTask(task);
   return task;
 }
 
@@ -347,7 +347,7 @@ async function createTingwuTask(input: {
       tingwuTaskStatus: tingwuTask.taskStatus,
     };
 
-    setHomeworkReviewTask(task);
+    await setHomeworkReviewTask(task);
     return task;
   } catch (error) {
     await deleteHomeworkReviewSourceFile(uploadResult.objectKey).catch((cleanupError) => {
@@ -374,7 +374,7 @@ async function syncTingwuTranscriptionTask(task: HomeworkReviewTaskState) {
 
   task.processing = true;
   task.updatedAt = nowIso();
-  setHomeworkReviewTask(task);
+  await setHomeworkReviewTask(task);
 
   try {
     const tingwuTask = await getTingwuTaskInfo(task.tingwuTaskId);
@@ -391,13 +391,13 @@ async function syncTingwuTranscriptionTask(task: HomeworkReviewTaskState) {
         : "通义听悟转写失败";
       task.message = "转写失败";
       await cleanupTaskSourceFile(task);
-      setHomeworkReviewTask(task);
+      await setHomeworkReviewTask(task);
       return task;
     }
 
     if (tingwuTask.taskStatus !== "COMPLETED") {
       task.message = "通义听悟转写中，请稍后查看结果";
-      setHomeworkReviewTask(task);
+      await setHomeworkReviewTask(task);
       return task;
     }
 
@@ -408,7 +408,7 @@ async function syncTingwuTranscriptionTask(task: HomeworkReviewTaskState) {
       task.error = "通义听悟任务已完成，但未返回转写结果链接";
       task.message = "转写失败";
       await cleanupTaskSourceFile(task);
-      setHomeworkReviewTask(task);
+      await setHomeworkReviewTask(task);
       return task;
     }
 
@@ -417,12 +417,12 @@ async function syncTingwuTranscriptionTask(task: HomeworkReviewTaskState) {
     task.step = 3;
     task.error = undefined;
     task.message = "正在生成批阅结果";
-    setHomeworkReviewTask(task);
+    await setHomeworkReviewTask(task);
     return task;
   } finally {
     task.processing = false;
     task.updatedAt = nowIso();
-    setHomeworkReviewTask(task);
+    await setHomeworkReviewTask(task);
   }
 }
 
@@ -458,7 +458,7 @@ export async function submitHomeworkReviewTask(input: {
 
   const task =
     provider === "mock"
-      ? createMockTask({
+      ? await createMockTask({
           fileName: source.fileName,
           fileSize: source.fileSize,
           question,
@@ -481,7 +481,7 @@ export async function submitHomeworkReviewTask(input: {
 }
 
 export async function getHomeworkReviewTaskPayload(taskId: string) {
-  const task = getHomeworkReviewTask(taskId);
+  const task = await getHomeworkReviewTask(taskId);
 
   if (!task) {
     throw new Error("任务不存在，可能已过期");
@@ -502,7 +502,7 @@ export async function getHomeworkReviewTaskPayload(taskId: string) {
       task.step = 3;
       task.message = "演示模式正在生成批阅结果";
       task.updatedAt = nowIso();
-      setHomeworkReviewTask(task);
+      await setHomeworkReviewTask(task);
       return toTaskPayload(task);
     }
 
@@ -531,7 +531,7 @@ export async function getHomeworkReviewTaskPayload(taskId: string) {
 
       task.message = "转写状态查询失败，将自动重试";
       task.updatedAt = nowIso();
-      setHomeworkReviewTask(task);
+      await setHomeworkReviewTask(task);
       return toTaskPayload(task);
     }
   }

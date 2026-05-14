@@ -16,6 +16,7 @@ import { getLLMErrorInfo } from "@/lib/openai";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+export const preferredRegion = ["sin1"];
 
 function jsonError(message: string, status: number) {
   return NextResponse.json<ApiErrorResponse>(

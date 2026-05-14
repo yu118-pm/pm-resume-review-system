@@ -4,6 +4,7 @@ import { getLLMConfigSummary } from "@/lib/openai";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+export const preferredRegion = ["sin1"];
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T) {
   let timer: ReturnType<typeof setTimeout> | undefined;
